@@ -355,7 +355,7 @@ def test_site_card_hits():
             "xg": {"home": 1.1, "away": 1.0}, "referee": "M Oliver", "absences": []}
     c = site.card(r, pred)
     assert c["badge"] == "PL" and c["referee"] == "M Oliver"
-    assert c["hit"] == {"result": True, "exact": True, "top3": True}
+    assert c["hit"] == {"result": True, "exact": True, "top3": True, "top6": None}   # only 3 scores given
     assert site.card(dict(r, status="SCHEDULED", fthg=None, ftag=None), pred).get("hit") is None
 
 
