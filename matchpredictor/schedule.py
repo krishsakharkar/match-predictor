@@ -34,8 +34,9 @@ def gate(now: datetime | None = None, db_path: str | Path | None = None) -> str:
     end = (now + timedelta(minutes=hi)).astimezone(timezone.utc).strftime(fmt)
     conn = sqlite3.connect(str(db_path))
     try:
-        n = conn.execute("SELECT COUNT(*) FROM matches WHERE status='SCHEDULED' AND kickoff_utc >= ? "
-                         "AND kickoff_utc < ?", (start, end)).fetchone()[0]
+        rows = conn.execute("SELECT league, home, away FROM matches WHERE status='SCHEDULED' AND kickoff_utc >= ? "
+                            "AND kickoff_utc < ?", (start, end)).fetchall()
+        n = sum(1 for lg, h, a in rows if config.is_displayed(lg, h, a))
     except sqlite3.OperationalError:
         n = 0
     finally:

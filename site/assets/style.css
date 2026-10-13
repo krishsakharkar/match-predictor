@@ -27,9 +27,6 @@ header.top {
 }
 .top-inner { max-width: 760px; margin: 0 auto; padding: 10px 16px; display: flex; align-items: center; gap: 14px; }
 .brand { font-weight: 700; letter-spacing: .2px; text-decoration: none; white-space: nowrap; }
-nav { display: flex; gap: 4px; margin-left: auto; overflow-x: auto; }
-nav a { text-decoration: none; color: var(--muted); padding: 6px 10px; border-radius: 8px; font-size: 14px; white-space: nowrap; }
-nav a.active, nav a:hover { color: var(--text); background: var(--surface-2); }
 main { max-width: 760px; margin: 0 auto; padding: 16px; }
 h1 { font-size: 20px; margin: 4px 0 12px; }
 h2 { font-size: 15px; margin: 22px 0 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .6px; }
@@ -87,8 +84,20 @@ td.pos { color: var(--good); } td.neg { color: var(--bad); }
 svg text { fill: var(--muted); font-size: 11px; }
 footer { max-width: 760px; margin: 0 auto; padding: 20px 16px 40px; color: var(--muted); font-size: 12px; }
 @media (min-width: 640px) { .score .pred { font-size: 20px; } }
-@media (max-width: 480px) {
-  .top-inner { flex-wrap: wrap; row-gap: 6px; padding-bottom: 6px; }
-  nav { margin-left: 0; width: 100%; }
-  nav a { flex: 1; text-align: center; }
-}
+.tagline { margin-left: auto; }
+.comp { display: inline-block; font-size: 11px; font-weight: 600; letter-spacing: .3px; padding: 1px 8px;
+  border-radius: 6px; background: var(--surface-2); border: 1px solid var(--border); color: var(--text); }
+h3.day { font-size: 13px; color: var(--muted); margin: 16px 0 8px; font-weight: 600; }
+.scores { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+.score-chip { font-size: 13px; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--border);
+  background: var(--surface-2); font-variant-numeric: tabular-nums; }
+.score-chip.top { border-color: var(--home); }
+.meta { margin-top: 10px; display: grid; gap: 3px; }
+.hits { margin-top: 10px; display: flex; gap: 6px; flex-wrap: wrap; }
+.summary { background: var(--surface); border: 1px solid var(--border); border-left: 3px solid var(--home);
+  border-radius: var(--radius); padding: 4px 14px; }
+.summary h2 { margin-top: 12px; }
+.summary ul { padding-left: 18px; margin: 8px 0 12px; }
+.summary li { margin-bottom: 6px; }
+th.l, td.l { text-align: left; }
+footer a { color: var(--text); }

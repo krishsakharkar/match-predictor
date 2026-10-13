@@ -1,0 +1,151 @@
+{
+  "EPL": {
+    "name": "Premier League",
+    "badge": "PL",
+    "type": "league",
+    "coverage": "full",
+    "country": "ENG",
+    "football_data_code": "E0",
+    "mirror_slug": "premier-league",
+    "odds_api_sport": "soccer_epl",
+    "api_football_id": 39,
+    "time_decay_xi": 0.005,
+    "enabled": true
+  },
+  "UCL": {
+    "name": "Champions League",
+    "badge": "UCL",
+    "type": "europe",
+    "coverage": "full",
+    "odds_api_sport": "soccer_uefa_champs_league",
+    "api_football_id": 2,
+    "enabled": true
+  },
+  "LALIGA": {
+    "name": "La Liga",
+    "badge": "LaLiga",
+    "type": "league",
+    "coverage": "teams",
+    "country": "ESP",
+    "football_data_code": "SP1",
+    "mirror_slug": "la-liga",
+    "odds_api_sport": "soccer_spain_la_liga",
+    "api_football_id": 140,
+    "time_decay_xi": 0.0019,
+    "enabled": true
+  },
+  "BUNDESLIGA": {
+    "name": "Bundesliga",
+    "badge": "Bundesliga",
+    "type": "league",
+    "coverage": "teams",
+    "country": "GER",
+    "football_data_code": "D1",
+    "mirror_slug": "bundesliga",
+    "odds_api_sport": "soccer_germany_bundesliga",
+    "api_football_id": 78,
+    "enabled": true
+  },
+  "SERIEA": {
+    "name": "Serie A",
+    "badge": "Serie A",
+    "type": "league",
+    "coverage": "teams",
+    "country": "ITA",
+    "football_data_code": "I1",
+    "mirror_slug": "serie-a",
+    "odds_api_sport": "soccer_italy_serie_a",
+    "api_football_id": 135,
+    "enabled": true
+  },
+  "LIGUE1": {
+    "name": "Ligue 1",
+    "badge": "Ligue 1",
+    "type": "league",
+    "coverage": "teams",
+    "country": "FRA",
+    "football_data_code": "F1",
+    "mirror_slug": "ligue-1",
+    "odds_api_sport": "soccer_france_ligue_one",
+    "api_football_id": 61,
+    "enabled": true
+  },
+  "UEL": {
+    "name": "Europa League",
+    "badge": "UEL",
+    "type": "europe",
+    "coverage": "teams",
+    "odds_api_sport": "soccer_uefa_europa_league",
+    "api_football_id": 3,
+    "enabled": true
+  },
+  "UECL": {
+    "name": "Conference League",
+    "badge": "UECL",
+    "type": "europe",
+    "coverage": "teams",
+    "odds_api_sport": "soccer_uefa_europa_conference_league",
+    "api_football_id": 848,
+    "enabled": true
+  },
+  "FACUP": {
+    "name": "FA Cup",
+    "badge": "FA Cup",
+    "type": "cup",
+    "coverage": "teams",
+    "country": "ENG",
+    "odds_api_sport": "soccer_fa_cup",
+    "api_football_id": 45,
+    "enabled": true
+  },
+  "EFLCUP": {
+    "name": "EFL Cup",
+    "badge": "EFL Cup",
+    "type": "cup",
+    "coverage": "teams",
+    "country": "ENG",
+    "odds_api_sport": "soccer_england_efl_cup",
+    "api_football_id": 48,
+    "enabled": true
+  },
+  "COPADELREY": {
+    "name": "Copa del Rey",
+    "badge": "Copa del Rey",
+    "type": "cup",
+    "coverage": "teams",
+    "country": "ESP",
+    "odds_api_sport": "soccer_spain_copa_del_rey",
+    "api_football_id": 143,
+    "enabled": true
+  },
+  "DFBPOKAL": {
+    "name": "DFB-Pokal",
+    "badge": "DFB-Pokal",
+    "type": "cup",
+    "coverage": "teams",
+    "country": "GER",
+    "odds_api_sport": "soccer_germany_dfb_pokal",
+    "api_football_id": 81,
+    "enabled": true
+  },
+  "COPPAITALIA": {
+    "name": "Coppa Italia",
+    "badge": "Coppa Italia",
+    "type": "cup",
+    "coverage": "teams",
+    "country": "ITA",
+    "odds_api_sport": "soccer_italy_coppa_italia",
+    "api_football_id": 137,
+    "enabled": true
+  },
+  "COUPEDEFRANCE": {
+    "name": "Coupe de France",
+    "badge": "Coupe de France",
+    "type": "cup",
+    "coverage": "teams",
+    "country": "FRA",
+    "odds_api_sport": "soccer_france_coupe_de_france",
+    "api_football_id": 66,
+    "enabled": true
+  }
+}

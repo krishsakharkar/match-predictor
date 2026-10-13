@@ -2,14 +2,17 @@ name: predict
 
 # One hourly tick; `python -m matchpredictor gate` (stdlib only, runs before installing anything)
 # decides whether this tick is the 09:00 ET daily run, a pre-kickoff refresh (a kickoff 45-105 min
-# away), or nothing. Off-hours ticks exit in seconds and spend no API credits.
+# away: picks up confirmed lineups and re-predicts), or nothing.
+# Manual modes: daily | prekickoff | backtest | netcheck.
+# Only runs on main commit data and deploy Pages; runs on other branches are read-only checks
+# (their results go to the job log and an artifact).
 on:
   schedule:
     - cron: "7 * * * *"
   workflow_dispatch:
     inputs:
       mode:
-        description: "daily | prekickoff | backtest"
+        description: "daily | prekickoff | backtest | netcheck"
         default: daily
 
 permissions:
@@ -18,13 +21,13 @@ permissions:
   id-token: write
 
 concurrency:
-  group: predict
+  group: predict-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
   predict:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 45
     outputs:
       mode: ${{ steps.gate.outputs.mode }}
     steps:
@@ -51,8 +54,20 @@ jobs:
         if: steps.gate.outputs.mode != 'skip'
         run: pip install -r requirements.txt
 
+      - name: Network check
+        if: steps.gate.outputs.mode == 'netcheck' || steps.gate.outputs.mode == 'backtest'
+        run: python -m matchpredictor netcheck
+
+      # Understat / ClubElo / API-Football history caches (immutable or slow-changing raw responses)
+      - uses: actions/cache@v4
+        if: steps.gate.outputs.mode != 'skip' && steps.gate.outputs.mode != 'netcheck'
+        with:
+          path: data/cache
+          key: data-cache-${{ github.run_id }}
+          restore-keys: data-cache-
+
       - name: Tests
-        if: steps.gate.outputs.mode != 'skip'
+        if: steps.gate.outputs.mode != 'skip' && steps.gate.outputs.mode != 'netcheck'
         run: python -m pytest -q
 
       - name: Run pipeline
@@ -62,18 +77,27 @@ jobs:
           API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
         run: python -m matchpredictor run --mode "${{ steps.gate.outputs.mode }}"
 
-      - name: Backtest (weekly, on demand, or when missing)
-        if: >-
-          steps.gate.outputs.mode == 'backtest' ||
-          (steps.gate.outputs.mode == 'daily' && github.event_name == 'schedule')
+      - name: Backtest (on demand, weekly on Mondays, or when missing)
+        if: steps.gate.outputs.mode == 'backtest' || steps.gate.outputs.mode == 'daily'
+        env:
+          API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
         run: |
           if [ "${{ steps.gate.outputs.mode }}" = "backtest" ] || [ "$(date -u +%u)" = "1" ] || [ ! -f site/data/backtest.json ]; then
-            [ "${{ steps.gate.outputs.mode }}" = "backtest" ] && python -m matchpredictor history
-            python -m matchpredictor backtest
+            python -m matchpredictor backtest --refresh --markdown backtest.md
+            cat backtest.md >> "$GITHUB_STEP_SUMMARY"
           fi
 
+      - name: Upload backtest report
+        if: steps.gate.outputs.mode == 'backtest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: backtest-${{ github.run_id }}
+          path: |
+            backtest.md
+            site/data/backtest.json
+
       - name: Commit data
-        if: steps.gate.outputs.mode != 'skip'
+        if: github.ref == 'refs/heads/main' && steps.gate.outputs.mode != 'skip' && steps.gate.outputs.mode != 'netcheck'
         run: |
           git config user.name "match-predictor bot"
           git config user.email "actions@users.noreply.github.com"
@@ -86,13 +110,13 @@ jobs:
           fi
 
       - uses: actions/upload-pages-artifact@v3
-        if: steps.gate.outputs.mode != 'skip'
+        if: github.ref == 'refs/heads/main' && steps.gate.outputs.mode != 'skip' && steps.gate.outputs.mode != 'netcheck'
         with:
           path: site
 
   deploy:
     needs: predict
-    if: needs.predict.outputs.mode != 'skip'
+    if: github.ref == 'refs/heads/main' && needs.predict.outputs.mode != 'skip' && needs.predict.outputs.mode != 'netcheck'
     runs-on: ubuntu-latest
     environment:
       name: github-pages

@@ -1,138 +1,128 @@
 # match-predictor
 
-Football match predictions and value-bet tracking for the **Premier League** and **La Liga**
-(other leagues: add an entry to `config/leagues.json`). It runs as a static GitHub Pages site and
-updates itself through one GitHub Actions workflow. The daily pipeline makes no LLM calls.
+Win/draw/loss probabilities and scoreline predictions for:
 
-- `index.html`: upcoming and recent matches, each with predicted score, win/draw/loss %, and the result or "TBD". Tap a card for xG, corners, SOT, cards, lineups, props, and value vs FanDuel.
-- `value.html`: value bets for today and the coming days, sorted by edge.
-- `performance.html`: Brier score, log loss, calibration, ROI, CLV, biggest misses, and the backtest.
+- every **Premier League** match,
+- every **Champions League** match,
+- every match, in any competition, of **Barcelona, Real Madrid, Atlético Madrid, Bayern, PSG,
+  Dortmund, Inter, Man United, Man City, Liverpool, Arsenal, Chelsea and Tottenham**.
+
+It runs as a static GitHub Pages site that updates itself through one GitHub Actions workflow, with
+no LLM calls in the daily pipeline. **Phase A** is about accuracy only. Value bets and the corners,
+cards, shots and player-prop models are paused; their code is kept for later phases.
+
+- `index.html`: matches from the last 7 days and the next 7, grouped by date, each with a competition
+  badge. Every card shows W/D/L %, the most likely score plus the top 3, key absences, the referee,
+  and the result (or TBD) with hit/miss marks once played.
+- `accuracy.html`: the backtest summary, a table of what each factor adds, calibration, the
+  Champions League section, live tracking, and match-by-match tables.
 - `data/predictions.json`: machine-readable output for other tools.
 
-> Phase 1 MVP. The probabilities are model estimates. Read the backtest before trusting any edge.
+## Backtest results (2025-26)
+
+Method: walk-forward over 1,752 matches in the five big leagues. Before every match week the model
+is refitted on earlier matches only. Settings were tuned on 2024-25 and never on the test season.
+The benchmark is closing bookmaker odds with the margin removed, used as an accuracy yardstick only.
+
+**In plain English**
+
+- The model's favourite won **52.7%** of matches. The bookmakers' closing favourite won **53.4%**.
+- The single most likely scoreline was exactly right **12.6%** of the time. The real score was in
+  the model's top 3 in **33.4%** of matches.
+- On probability quality (log loss **0.993** vs **0.978**, lower is better), it is a little worse
+  than closing prices. Those are the toughest public benchmark: they already include team news and
+  heavy betting volume.
+- **xG helps** and is switched on. Ratings are fitted on 75% Understat xG and 25% actual goals.
+- **Rest days and injuries did not help**, so they are switched off. The ClubElo blend could not be
+  tested because ClubElo was unreachable.
+
+| Variant | Result hit | Exact score | Top-3 score | Brier | Log loss | Δ log loss |
+|---|---|---|---|---|---|---|
+| Base: Dixon-Coles on goals | 52.1% | 12.8% | 32.0% | 0.595 | 0.997 | – |
+| **+ xG (Understat), the model in use** | **52.7%** | 12.6% | **33.4%** | **0.592** | **0.993** | **−0.004** |
+| + Rest days | 52.1% | 13.0% | 32.1% | 0.595 | 0.998 | +0.001 |
+| Closing bookmaker odds | 53.4% | – | – | 0.582 | 0.978 | |
+
+By league. These figures are from the CI run's selected model (xG + rest days); the model in use drops rest days, which moves totals by under 0.001. The bookmaker figure is closing-odds log loss:
+
+| League | Result hit | Exact | Top-3 | Log loss | Bookmaker |
+|---|---|---|---|---|---|
+| Premier League | 50.3% | 10.8% | 31.8% | 1.027 | 1.014 |
+| La Liga | 52.1% | 18.7% | 39.5% | 0.977 | 0.965 |
+| Bundesliga | 54.6% | 10.5% | 27.1% | 0.972 | 0.950 |
+| Serie A | 52.4% | 10.8% | 36.3% | 1.001 | 0.978 |
+| Ligue 1 | 54.3% | 10.8% | 30.4% | 0.988 | 0.977 |
+
+**Champions League 2024-25** (189 matches, joint model, refitted weekly on earlier results): the
+favourite won **61%**, the exact score was right **5%** of the time, the real score was in the top 3
+**21%** of the time, and log loss was 0.915.
+
+**Injuries** were tested on 2024-25, the latest season API-Football's free plan covers. There were
+1,599 matches with injury lists. Only "fresh" absences counted, with the cutoff chosen on the first
+half of the season. Over the second half, log loss got 0.002 *worse*, so injuries stay off.
+Long-term absentees are already reflected in a team's recent results.
+
+## How a prediction is made
+
+1. **League ratings.** Dixon-Coles, fitted on `0.75·xG + 0.25·goals` with time decay and a ridge
+   penalty, plus a weaker starting point for promoted teams. The low-score correction uses real
+   scorelines.
+2. **Cross-competition strength.** One joint Dixon-Coles fit over all five leagues plus Champions
+   League results (seeded for 2022-25 in `data/history/ucl_results.csv`). European games put clubs
+   from different leagues on one scale. Clubs with no history get the average rating of clubs that
+   only appear in Europe, and the card says "thin data". When api.clubelo.com is reachable, ClubElo
+   ratings can be blended in. That path is built and tested, but off until a backtest shows it helps.
+3. **Context factors.** Each is switchable and gets its own row in the backtest's factor table:
+   - injuries, suspensions and confirmed lineups (players' npxG/xA/goal shares, with the keeper and
+     regular defenders weighted separately);
+   - rest days;
+   - home advantage per competition;
+   - the referee's penalty rate.
+
+   Referees are stored for every match. The penalty adjustment switches on once there is enough
+   referee data.
+4. **Daily re-optimisation.** Ratings are refitted from scratch on every run, so last night's
+   results are always included. The daily run also re-tunes the xG weight, the Elo blend, the rest
+   coefficient and the injury rule on a rolling 12-month walk-forward window. New settings are
+   adopted only if they beat the current ones by a clear margin, and every attempt is logged in
+   `model_params.tuning_log`.
 
 ## Quick start
 
 ```bash
 pip install -r requirements.txt
-export ODDS_API_KEY=...        # the-odds-api.com (free: 500 credits/month)
-export API_FOOTBALL_KEY=...    # api-football.com (free: 100 req/day)
-python -m pytest -q                         # model math + pipeline tests (offline)
-python -m matchpredictor run --mode daily   # fetch → predict → value → track → site/data/*.json
-python -m matchpredictor backtest           # walk-forward backtest → site/data/backtest.json
-python -m http.server -d site 8000          # view the site at http://localhost:8000
+python -m pytest -q
+python -m matchpredictor netcheck             # which data hosts are reachable
+python -m matchpredictor run --mode daily     # fetch → predict → site/data/*.json
+python -m matchpredictor backtest --refresh   # walk-forward backtest → site/data/backtest.json
+python -m http.server -d site 8000
 ```
 
-### Deploying (GitHub)
+Secrets: `ODDS_API_KEY` and `API_FOOTBALL_KEY`. Settings → Pages → Source: **GitHub Actions**. The
+workflow ticks hourly. It runs in full at 09:xx ET, re-predicts about an hour before kickoffs, and
+otherwise exits immediately. Dispatch it on any branch with `mode: backtest` or `mode: netcheck` to
+test without committing.
 
-1. Add the repo secrets `ODDS_API_KEY` and `API_FOOTBALL_KEY`.
-2. Settings → Pages → Source: **GitHub Actions**.
-3. Merge to the default branch. Scheduled workflows only run there. Then trigger **predict** once
-   from the Actions tab (`mode: daily`) to build the database and site.
+## Data sources
 
-The workflow ticks every hour at :07. A stdlib-only gate (`python -m matchpredictor gate`) picks
-the mode for each tick:
-
-| Mode | When | API cost |
+| Source | Used for | Status |
 |---|---|---|
-| `daily` | 09:xx US Eastern | history CSVs, fixtures (free), FanDuel odds for the next 7 days (2 credits/league), scores if needed (2 credits/league) |
-| `prekickoff` | a kickoff is 45–105 min away | FanDuel odds for leagues kicking off in the next 3 h (2 credits/league), lineups |
-| `skip` | otherwise | none (exits before installing dependencies) |
+| football-data.co.uk | 5 leagues × 6 seasons: results, stats, closing odds, EPL referees | reachable from Actions |
+| Understat | match xG, player npxG/xA | reachable from Actions |
+| The Odds API | fixtures for every competition (free), results | reachable; odds polling paused |
+| API-Football | injuries, lineups, referees, penalties, Champions League history | **account suspended**, see below |
+| ClubElo | cross-league ratings, rest days | **unreachable from GitHub Actions** (timeout) |
 
-Estimated usage is about 300–350 Odds API credits a month (budget: 500). After each run the workflow commits `data/match.db` and `site/data/` and deploys Pages. On Mondays
-it also re-runs the backtest.
+- **API-Football** returned "Your account is suspended" during the CI backtest. The free plan's
+  10-requests-a-minute limit was probably hit during setup; the client now paces itself at 6.5 s
+  per request and stops on the first suspension or plan error. Check
+  https://dashboard.api-football.com. Current-season injuries, lineups and referees also need the
+  Pro plan.
+- **ClubElo** may be down or blocking GitHub's servers. The pipeline falls back to the joint model.
 
-## Data sources and free-tier limits
+## Limitations
 
-| Source | Used for | Notes |
-|---|---|---|
-| football-data.co.uk | 5 seasons + current: results, shots, SOT, corners, cards, fouls, referee (England only), closing odds | If unreachable, falls back to a GitHub mirror of the same CSVs, which has **no odds**. Mirror seasons are re-fetched until the primary source succeeds. |
-| The Odds API | fixtures (`/events`, free), FanDuel `h2h` + `totals` (region `us`), scores | Responses are cached in SQLite. Calls stop when remaining credits drop under `reserve_credits` (40). In Oct 2026 FanDuel listed only `h2h` for these leagues. Totals are picked up automatically once listed. |
-| API-Football | fixture IDs, referees, injuries, lineups, player stats (top scorers) | **The free plan only allows seasons 2022–2024**, so for the current season it returns a plan error. The client detects this on the first call, turns itself off for the run, and the site shows "lineups / props unavailable". A paid plan enables injuries, lineups and player props with no code changes. |
-
-## Model
-
-**Goals: Dixon-Coles.** `λ_home = exp(c + home_adv + attack_home + defence_away)`,
-`μ_away = exp(c + attack_away + defence_home)`, with the Dixon-Coles low-score correction `ρ`.
-Matches are weighted by `exp(−ξ·days_ago)`, with ξ tuned per league (EPL 0.005 ≈ 140-day half-life,
-La Liga 0.0019 ≈ 1 year). A ridge penalty (3.0) shrinks ratings toward 0, and newly promoted teams
-are shrunk toward a weaker prior (attack −0.25, defence +0.20). The fit uses L-BFGS-B with an
-analytic gradient, which the tests check against finite differences.
-
-**Markets from the score matrix (0–10 goals):** 1X2, double chance, O/U 0.5–4.5, BTTS, team totals
-0.5/1.5/2.5, and the top 5 correct scores. Fair odds = 1/p for every market.
-
-**Absences:** each missing player's attacking share is ½·(goal share) + ½·(shot share). Shots stand
-in for xG, which football-data doesn't publish. Expected goals are scaled by
-`max(0.75, 1 − Σshare × (1 − 0.5))`, where 0.5 is how much of the output a replacement recovers.
-
-**Corners, shots, SOT, cards:** log-linear rating models per stat, with separate home and away
-means and opponent adjustment (`for`/`against` ratings), the same time decay, and a negative
-binomial whose dispersion comes from the method of moments. Cards are cards = yellow + red, and
-get a shrunk referee multiplier when the referee is known.
-
-**Player props:** `λ = team expected goals (or SOT) × player per-90 share × expected minutes/90`;
-anytime scorer = `1 − e^(−λ_goals)`, 1+ SOT = `1 − e^(−λ_sot)`.
-
-**Value:** FanDuel prices are de-vigged proportionally (2-way and 3-way markets).
-`edge = p_model / p_novig − 1`. A selection is flagged as **value** when edge ≥ 5%, EV at the real
-price > 0, and odds are between 1.3 and 10. Stake = ¼ Kelly, capped at 2% of bankroll. Edges above
-35% (`max_edge`) are marked **suspect** and not staked, because an edge that large is far more often
-model error than a mispriced line. Set `max_edge` to `null` to turn this off. With one bookmaker this
-is value betting, not arbitrage.
-
-**Tracking:** every prediction run is logged (`prediction_log`), and the last pre-kickoff
-prediction is frozen per match (`predictions`). The first price at which a bet is flagged is locked
-as *odds taken*. *Closing odds* = the last FanDuel snapshot before kickoff (fallback: football-data
-closing odds). Bets settle from results.
-
-## Backtest: season 2025-26
-
-Walk-forward: the model is refit every 7 days using only matches played before that week (5 prior
-seasons plus the season so far). Time decay was tuned on 2024-25, and the ridge settings were chosen
-on 2024-25 as well, never on the test season. Baseline = home/draw/away (and over/BTTS) frequencies
-from earlier seasons.
-
-| League | n | Brier 1X2 (model / baseline) | Log loss 1X2 (model / baseline) | Favourite hit rate | Brier O2.5 (model / baseline) | Brier BTTS (model / baseline) |
-|---|---|---|---|---|---|---|
-| Premier League | 380 | **0.620** / 0.656 | **1.031** / 1.085 | 46.8% / 42.6% | 0.256 / 0.248 | 0.247 / 0.246 |
-| La Liga | 380 | **0.579** / 0.632 | **0.976** / 1.050 | 52.1% / 49.0% | 0.247 / 0.251 | 0.250 / 0.249 |
-
-Count models (match totals; "constant" = always predicting that season's actual over rate, a
-benchmark that peeks at the answer):
-
-| League | Stat | MAE | Mean pred / actual | Brier over line (model / constant) |
-|---|---|---|---|---|
-| EPL | corners (9.5) | 2.65 | 9.96 / 10.00 | 0.251 / 0.246 |
-| EPL | cards (3.5) | 1.62 | 3.88 / 3.85 | 0.245 / 0.246 |
-| EPL | SOT (8.5) | 2.31 | 8.57 / 8.37 | 0.252 / 0.249 |
-| La Liga | corners (9.5) | 2.69 | 9.55 / 9.67 | 0.246 / 0.250 |
-| La Liga | cards (3.5) | 1.97 | 4.86 / 4.68 | 0.229 / 0.230 |
-| La Liga | SOT (8.5) | 2.32 | 8.43 / 8.67 | 0.244 / 0.250 |
-
-What the backtest says:
-
-- **1X2 has real signal:** a clear gain over the baseline in both leagues, and calibration is good
-  between 10% and 60%. Above 60% the model is slightly overconfident (bucket 0.6–0.7: predicted
-  63%, observed 57%).
-- **Totals and BTTS have about zero skill.** Model xG totals barely correlated with actual EPL
-  totals in 2025-26 (r ≈ 0.05). Treat O/U and BTTS edges with suspicion.
-- **Count models get the averages right** but barely beat a constant on over/under lines. La Liga
-  corners and SOT do slightly better. EPL corners and SOT don't.
-- **Biggest misses** are favourites losing at home: Real Madrid 0-1 Getafe (8.6%), Arsenal 1-2
-  Bournemouth (12.9%). See `performance.html`.
-- **ROI and CLV are not in this table.** The local backtest ran on the mirror CSVs, which have no
-  odds, because football-data.co.uk was blocked from the build sandbox. The workflow's weekly
-  backtest runs against football-data with closing odds and adds model-vs-market Brier and a
-  simulated value-bet ROI at closing prices to `site/data/backtest.json` and the performance page.
-  **Until that shows a non-negative ROI, treat flagged value bets as paper trades.**
-
-Reproduce: `python -m matchpredictor history && python -m matchpredictor backtest`.
-
-## Limitations / Phase 2
-
-- Single bookmaker (FanDuel, US region), so no line shopping or arbitrage.
-- No xG data: shots are the proxy. Player props and injuries need a paid API-Football plan.
-- The SQLite DB is committed on every run (~1 MB, so the repo grows over time). Moving it to an
-  orphan data branch is the easy fix if that becomes a problem.
-- Phase 2: a news/rumour LLM layer, more leagues, BTTS/alt totals from per-event odds endpoints.
+- Exact scorelines are hard: the most likely score is usually only 8–12% likely. Use the W/D/L %
+  and the top 3 rather than a single score.
+- Clubs outside the five leagues are rated only from their European games, which is thin data.
+- The SQLite database is committed on every run (about 1–2 MB), so the repo grows over time.

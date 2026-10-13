@@ -92,11 +92,13 @@ def rho_bounds(lam: np.ndarray, mu: np.ndarray) -> tuple[float, float]:
 
 
 def make_objective(home, away, home_goals, away_goals, weights=None, ridge=0.5,
-                   prior_attack=None, prior_defence=None):
+                   prior_attack=None, prior_defence=None, score_home=None, score_away=None):
     """Build the penalised negative log-likelihood and its analytic gradient.
 
     Parameter vector layout: [attack(k), defence(k), intercept, home_adv, rho].
-    Returns (objective, context) where context holds team indexing and priors.
+    `home_goals/away_goals` are the Poisson targets (may be non-integer, e.g. a goals/xG blend);
+    `score_home/score_away` are the actual scorelines used for the low-score tau correction
+    (default: the targets). Returns (objective, context).
     """
     home_goals = np.asarray(home_goals, dtype=float)
     away_goals = np.asarray(away_goals, dtype=float)
@@ -113,10 +115,12 @@ def make_objective(home, away, home_goals, away_goals, weights=None, ridge=0.5,
     pa = np.array([(prior_attack or {}).get(t, 0.0) for t in teams])
     pd = np.array([(prior_defence or {}).get(t, 0.0) for t in teams])
 
-    x00 = (home_goals == 0) & (away_goals == 0)
-    x01 = (home_goals == 0) & (away_goals == 1)
-    x10 = (home_goals == 1) & (away_goals == 0)
-    x11 = (home_goals == 1) & (away_goals == 1)
+    sh = home_goals if score_home is None else np.asarray(score_home, dtype=float)
+    sa = away_goals if score_away is None else np.asarray(score_away, dtype=float)
+    x00 = (sh == 0) & (sa == 0)
+    x01 = (sh == 0) & (sa == 1)
+    x10 = (sh == 1) & (sa == 0)
+    x11 = (sh == 1) & (sa == 1)
 
     def negll(p):
         att, dfn, c, h, rho = p[:k], p[k:2 * k], p[2 * k], p[2 * k + 1], p[2 * k + 2]
@@ -175,9 +179,11 @@ def fit(
     prior_attack: dict[str, float] | None = None,
     prior_defence: dict[str, float] | None = None,
     xi: float = 0.0,
+    score_home: np.ndarray | None = None,
+    score_away: np.ndarray | None = None,
 ) -> DixonColes:
     negll, ctx = make_objective(home, away, home_goals, away_goals, weights, ridge,
-                                prior_attack, prior_defence)
+                                prior_attack, prior_defence, score_home, score_away)
     k, w, hi, ai = ctx["k"], ctx["w"], ctx["hi"], ctx["ai"]
     bounds = [(-4, 4)] * (2 * k) + [(-3, 3), (-1, 1), (-0.25, 0.25)]
     res = minimize(negll, ctx["x0"], jac=True, method="L-BFGS-B", bounds=bounds,

@@ -79,6 +79,9 @@ def score_predictions(rows: list[dict]) -> dict:
             "p_actual": round(probs[act], 3), "log_loss": round(ll, 3),
         })
     misses.sort(key=lambda x: x["log_loss"], reverse=True)
+    scored = [r for r in rows if r.get("predicted_score")]
+    exact = [r["predicted_score"] == f"{r['fthg']}-{r['ftag']}" for r in scored]
+    top3 = [f"{r['fthg']}-{r['ftag']}" in (r.get("top_scores") or [r["predicted_score"]])[:3] for r in scored]
 
     def mean(x):
         return round(float(np.mean(x)), 4) if x else None
@@ -91,7 +94,11 @@ def score_predictions(rows: list[dict]) -> dict:
         "accuracy_1x2": round(float(np.mean([
             max(("home", "draw", "away"), key=lambda k: r[f"p_{k}"]) == outcome_1x2(r["fthg"], r["ftag"])
             for r in rows])), 4),
+        "exact_score_hit": round(float(np.mean(exact)), 4) if exact else None,
+        "top3_score_hit": round(float(np.mean(top3)), 4) if top3 else None,
         "calibration": calibration_buckets(pairs),
+        "calibration_1x2": {k: calibration_buckets([(r[f"p_{k}"], int(outcome_1x2(r["fthg"], r["ftag"]) == k))
+                                                    for r in rows]) for k in ("home", "draw", "away")},
         "biggest_misses": misses[:10],
     }
 
@@ -182,7 +189,8 @@ def tracked_rows(conn) -> list[dict]:
                     "away": r["away"], "fthg": r["fthg"], "ftag": r["ftag"],
                     "p_home": mk["1x2"]["home"], "p_draw": mk["1x2"]["draw"], "p_away": mk["1x2"]["away"],
                     "p_over25": mk["totals"]["2.5"]["over"], "p_btts": mk["btts"]["yes"],
-                    "predicted_score": pl.get("predicted_score")})
+                    "predicted_score": pl.get("predicted_score"),
+                    "top_scores": [c["score"] for c in pl.get("top_scores") or pl["markets"].get("correct_score", [])][:3]})
     return out
 
 
@@ -192,5 +200,5 @@ def performance(conn) -> dict:
     by_league = {}
     for lg in sorted({r["league"] for r in rows}):
         sub = score_predictions([r for r in rows if r["league"] == lg])
-        by_league[lg] = {k: v for k, v in sub.items() if k not in ("calibration", "biggest_misses")}
+        by_league[lg] = {k: v for k, v in sub.items() if k not in ("calibration", "calibration_1x2", "biggest_misses")}
     return {"predictions": score_predictions(rows), "by_league": by_league, "bets": score_bets(bets)}
