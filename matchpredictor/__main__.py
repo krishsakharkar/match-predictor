@@ -36,7 +36,7 @@ def main(argv=None):
     ap = argparse.ArgumentParser(prog="matchpredictor")
     sub = ap.add_subparsers(dest="cmd", required=True)
     r = sub.add_parser("run", help="fetch data, predict, track, build site")
-    r.add_argument("--mode", choices=["auto", "daily", "prekickoff"], default="daily")
+    r.add_argument("--mode", choices=["auto", "daily", "prekickoff", "results"], default="daily")
     h = sub.add_parser("history", help="refresh football-data, Understat, ClubElo (and API-Football history)")
     h.add_argument("--backtest-data", action="store_true", help="also fetch API-Football history for the backtest")
     b = sub.add_parser("backtest", help="walk-forward accuracy backtest with ablation")

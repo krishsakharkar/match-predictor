@@ -2,6 +2,7 @@
 
     daily       -> at the configured hour in US Eastern time (09:xx ET)
     prekickoff  -> a kickoff falls 45-105 minutes from now (hourly ticks hit each kickoff once)
+    results     -> a shown match kicked off 2-5 hours ago and has no result yet
     skip        -> otherwise
 """
 from __future__ import annotations
@@ -41,4 +42,18 @@ def gate(now: datetime | None = None, db_path: str | Path | None = None) -> str:
         n = 0
     finally:
         conn.close()
-    return "prekickoff" if n else "skip"
+    if n:
+        return "prekickoff"
+    # a shown match kicked off 2-5 hours ago and still has no result -> fetch scores
+    r_start = (now - timedelta(hours=5)).astimezone(timezone.utc).strftime(fmt)
+    r_end = (now - timedelta(hours=2)).astimezone(timezone.utc).strftime(fmt)
+    conn = sqlite3.connect(str(db_path))
+    try:
+        rows = conn.execute("SELECT league, home, away FROM matches WHERE status='SCHEDULED' AND kickoff_utc >= ? "
+                            "AND kickoff_utc < ?", (r_start, r_end)).fetchall()
+        pending = sum(1 for lg, h, a in rows if config.is_displayed(lg, h, a))
+    except sqlite3.OperationalError:
+        pending = 0
+    finally:
+        conn.close()
+    return "results" if pending else "skip"

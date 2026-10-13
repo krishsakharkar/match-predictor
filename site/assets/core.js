@@ -51,7 +51,7 @@
     if (m.result) right = `<b>FT ${m.result.home}–${m.result.away}</b>`;
     else if (m.kickoff_utc && m.kickoff_utc < new Date().toISOString()) right = `<span class="muted">awaiting result</span>`;
     return `<article class="card" tabindex="0" data-expand>
-      <div class="card-head"><span class="comp">${MP.esc(m.badge)}</span><span>${MP.esc(MP.timeOf(m))}</span></div>
+      <div class="card-head"><span><span class="comp">${MP.esc(m.badge)}</span>${m.prediction && m.prediction.retro ? ` <span class="badge" title="Predicted after kickoff using only data from before the match. Not counted in live accuracy.">backfilled</span>` : ""}</span><span>${MP.esc(MP.timeOf(m) || m.date)}</span></div>
       <div class="teams"><div class="team">${MP.esc(m.home)}</div>
         <div class="score">${centre}<div class="result">${right}</div></div>
         <div class="team away">${MP.esc(m.away)}</div></div>

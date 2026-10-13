@@ -12,7 +12,7 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "daily | prekickoff | backtest | netcheck"
+        description: "daily | prekickoff | results | backtest | netcheck"
         default: daily
 
 permissions:
@@ -71,7 +71,7 @@ jobs:
         run: python -m pytest -q
 
       - name: Run pipeline
-        if: steps.gate.outputs.mode == 'daily' || steps.gate.outputs.mode == 'prekickoff'
+        if: steps.gate.outputs.mode == 'daily' || steps.gate.outputs.mode == 'prekickoff' || steps.gate.outputs.mode == 'results'
         env:
           ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
           API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
