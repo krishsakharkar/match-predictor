@@ -16,7 +16,7 @@
       0.005,
       0.0075
     ],
-    "xg_weight": 0.5,
+    "xg_weight": 0.75,
     "xg_weight_grid": [
       0.0,
       0.25,
@@ -172,10 +172,15 @@
   },
   "factors": {
     "xg": true,
-    "elo": true,
-    "injuries": true,
-    "rest": true,
-    "referee_penalties": true
+    "elo": false,
+    "rest": false,
+    "injuries": false,
+    "referee_penalties": false
   },
-  "phase": "A"
+  "phase": "A",
+  "auto_tune": {
+    "enabled": true,
+    "window_days": 365,
+    "refit_days": 14
+  }
 }

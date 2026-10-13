@@ -15,7 +15,7 @@ from . import MODEL_VERSION, config, db, history, tracking
 from .absences import match_absences
 from .ingest import api_football, clubelo, football_data, odds_api
 from .ingest.http_cache import iso, now_utc, parse_iso
-from .predict import Predictor, load_matches
+from .predict import ALL_FACTORS, Predictor, load_matches
 
 log = logging.getLogger(__name__)
 
@@ -167,6 +167,10 @@ def run(conn, mode: str = "daily") -> dict:
     if mode == "daily":
         history.refresh(conn, cur, notes)
         sync_referees_fd(conn)
+        if config.settings().get("auto_tune", {}).get("enabled"):
+            from .backtest import rolling_tune      # re-optimise settings on the latest results
+            at = config.settings()["auto_tune"]
+            rolling_tune(conn, notes, days=at["window_days"], refit_days=at["refit_days"])
     sync_fixtures(conn, notes)
     sync_results(conn, notes)
     conn.commit()
@@ -190,13 +194,17 @@ def run(conn, mode: str = "daily") -> dict:
                 db.set_param(conn, "elo_params", fitted, iso(now))
     fixture_teams = {lg: set(upcoming[upcoming.league == lg].home) | set(upcoming[upcoming.league == lg].away)
                      for lg in config.leagues()}
-    pred = Predictor(df, now.date(), elo_book=book, elo_params=elo_params, fixture_teams=fixture_teams)
+    from .backtest import current_config
+    cfg = current_config(conn)                 # settings.json, overridden by the last adopted auto-tune
+    pred = Predictor(df, now.date(), elo_book=book, elo_params=elo_params, fixture_teams=fixture_teams,
+                     factors={f: cfg[f] for f in ALL_FACTORS}, xg_weight=cfg["xg_weight"] if cfg["xg"] else 0.0,
+                     blend_weight=cfg["blend_weight"], rest_coef=cfg["rest_coef"])
 
     n_pred, skipped = 0, []
     for m in upcoming.itertuples():
         day = m.kickoff_utc[:10]
         lh, la = pred.team_league.get(m.home), pred.team_league.get(m.away)
-        effects, shown = match_absences(conn, m.id, m.home, m.away, lh, la, cur)
+        effects, shown = match_absences(conn, m.id, m.home, m.away, lh, la, cur, fresh_k=cfg.get("fresh_k"))
         ref = m.referee if isinstance(m.referee, str) else None
         p = pred.predict(m.league, m.home, m.away, day, absences=effects, referee=ref)
         if p is None:

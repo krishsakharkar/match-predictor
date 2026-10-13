@@ -357,3 +357,19 @@ def test_site_card_hits():
     assert c["badge"] == "PL" and c["referee"] == "M Oliver"
     assert c["hit"] == {"result": True, "exact": True, "top3": True}
     assert site.card(dict(r, status="SCHEDULED", fthg=None, ftag=None), pred).get("hit") is None
+
+
+def test_current_config_prefers_adopted_tune(conn):
+    from matchpredictor import backtest
+    base = backtest.current_config(conn)
+    assert base["xg_weight"] == config.settings()["model"]["xg_weight"]
+    db.set_param(conn, "tuned", {"config": {"xg_weight": 0.25, "elo": True, "blend_weight": 0.75}}, "now")
+    cfg = backtest.current_config(conn)
+    assert cfg["xg_weight"] == 0.25 and cfg["elo"] is True and cfg["blend_weight"] == 0.75
+
+
+def test_rolling_tune_needs_enough_matches(conn):
+    from matchpredictor import backtest
+    notes = []
+    out = backtest.rolling_tune(conn, notes, today="2026-10-13")
+    assert out["adopted"] is False and "skipped" in notes[0]

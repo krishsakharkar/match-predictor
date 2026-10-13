@@ -48,9 +48,15 @@ def _meta(g) -> dict:
     return r
 
 
-def collect_league(df, conn, book, league: str, season: str, xg_weights, elo_params, refit_days=7) -> list[dict]:
-    games = df[(df.league == league) & (df.season == season) & (df.status == "FT")].dropna(
-        subset=["fthg", "ftag"]).sort_values("date")
+def collect_league(df, conn, book, league: str, season: str | None, xg_weights, elo_params, refit_days=7,
+                   start=None, end=None) -> list[dict]:
+    """Walk-forward rows for one league: a whole season, or a date window [start, end)."""
+    games = df[(df.league == league) & (df.status == "FT")].dropna(subset=["fthg", "ftag"])
+    if season is not None:
+        games = games[games.season == season]
+    if start is not None:
+        games = games[(games.date >= pd.Timestamp(start)) & (games.date < pd.Timestamp(end))]
+    games = games.sort_values("date")
     rows = []
     for block, chunk in _blocks(games, refit_days):
         models = {xw: fit_league(df, league, block.date(), xg_weight=xw) for xw in xg_weights}
@@ -63,7 +69,8 @@ def collect_league(df, conn, book, league: str, season: str, xg_weights, elo_par
             info = pred.components(league, g.home, g.away, day)
             if not (models[xg_weights[0]].knows(g.home) and models[xg_weights[0]].knows(g.away)):
                 continue          # keep every variant on the same set of matches
-            abs_eff = {k: match_absences(conn, g.id, g.home, g.away, league, league, season, allow_current=False,
+            sea = season or g.season
+            abs_eff = {k: match_absences(conn, g.id, g.home, g.away, league, league, sea, allow_current=False,
                                          fresh_k=k)[0] for k in FRESH_GRID} if conn is not None else {}
             abs_eff = {k: v for k, v in abs_eff.items() if v}
             rows.append({**_meta(pd.Series(g._asdict())), "info": {k: v for k, v in info.items() if k != "dc"},
@@ -395,3 +402,64 @@ def to_markdown(rep: dict) -> str:
     if rep.get("notes"):
         out += ["", "Notes:"] + [f"- {n}" for n in rep["notes"]]
     return "\n".join(out)
+
+
+# ---------------------------------------------------------------- daily auto-tune
+
+def current_config(conn) -> dict:
+    """The model configuration production uses: settings.json, overridden by the last adopted auto-tune."""
+    from . import db
+    s = config.settings()
+    cfg = {"xg_weight": s["model"]["xg_weight"] if s["factors"].get("xg") else 0.0,
+           "blend_weight": s["elo"]["blend_weight_dc"], "rest_coef": s["rest"]["coef"],
+           "fresh_k": s["injuries"].get("fresh_absence_matches") or 0,
+           **{f: bool(s["factors"].get(f)) for f in ALL_FACTORS}}
+    tuned = db.get_param(conn, "tuned")
+    if tuned:
+        cfg.update(tuned["config"])
+    return cfg
+
+
+def rolling_tune(conn, notes: list[str], days: int = 365, refit_days: int = 14, today=None) -> dict:
+    """Re-tune xG weight, Elo blend, rest coefficient and injuries on the last `days` of league matches
+    (walk-forward, refit every `refit_days`), and adopt the result only if it beats the configuration
+    in use on that same window by more than KEEP_THRESHOLD. Ratings themselves are refitted on every run."""
+    from . import db
+    from .ingest.clubelo import EloBook
+    from .ingest.http_cache import iso, now_utc
+    today = pd.Timestamp(today or now_utc().date())
+    start = today - pd.Timedelta(days=days)
+    df = load_matches(conn)
+    book = EloBook(conn)
+    book = book if book else None
+    s = config.settings()
+    has_xg = "xg_home" in df and df[df.date >= start].xg_home.notna().any()
+    xws = sorted(set(s["model"]["xg_weight_grid"]) if has_xg else {0.0})
+    ep = (fit_elo_params(df, book, before=start.strftime("%Y-%m-%d")) if book else None) or s["elo"]["default_params"]
+    rows = []
+    for lg in config.leagues():
+        rows += collect_league(df, conn, book, lg, None, xws, ep, refit_days, start=start, end=today)
+    if len(rows) < 300:
+        notes.append(f"Auto-tune skipped: only {len(rows)} recent matches")
+        return {"adopted": False, "n": len(rows)}
+    base = {"xg_weight": 0.0, "blend_weight": 1.0, "rest_coef": 0.0, "elo_params": ep,
+            **{f: False for f in ALL_FACTORS}}
+    new_cfg, log_ = tune(rows, base, [])
+    cur = dict(current_config(conn), elo_params=ep)
+    if cur["xg_weight"] not in xws:
+        cur["xg_weight"] = min(xws, key=lambda x: abs(x - cur["xg_weight"]))
+    ll_cur, ll_new = ll(evaluate(rows, cur)), ll(evaluate(rows, new_cfg))
+    adopt = ll_new < ll_cur - KEEP_THRESHOLD
+    keep = {k: new_cfg.get(k) for k in ("xg_weight", "blend_weight", "rest_coef", "fresh_k", *ALL_FACTORS)}
+    entry = {"date": today.strftime("%Y-%m-%d"), "n": len(rows), "window_days": days,
+             "log_loss_current": round(ll_cur, 5), "log_loss_candidate": round(ll_new, 5), "adopted": adopt,
+             "candidate": keep, "tuning": log_}
+    history_ = (db.get_param(conn, "tuning_log") or [])[-59:] + [entry]
+    db.set_param(conn, "tuning_log", history_, iso(now_utc()))
+    if adopt:
+        db.set_param(conn, "tuned", {"config": keep, "elo_params": ep, "date": entry["date"],
+                                     "log_loss": round(ll_new, 5)}, iso(now_utc()))
+        notes.append(f"Auto-tune adopted new settings (log loss {ll_cur:.4f} -> {ll_new:.4f} on {len(rows)} "
+                     f"recent matches): {keep}")
+    conn.commit()
+    return entry
