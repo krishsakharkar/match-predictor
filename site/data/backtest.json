@@ -219,9 +219,39 @@
     "log_loss_btts": 0.686,
     "accuracy_1x2": 0.4263
    },
-   "market_closing": null,
-   "market_closing_model_same_games": null,
-   "value_bets_at_close": null,
+   "market_closing": {
+    "n": 380,
+    "brier_1x2": 0.6092,
+    "log_loss_1x2": 1.0139,
+    "brier_over25": 0.245,
+    "log_loss_over25": 0.6831,
+    "brier_btts": null,
+    "log_loss_btts": null,
+    "accuracy_1x2": 0.4868
+   },
+   "market_closing_model_same_games": {
+    "n": 380,
+    "brier_1x2": 0.6197,
+    "log_loss_1x2": 1.0312,
+    "brier_over25": 0.2556,
+    "log_loss_over25": 0.7053,
+    "brier_btts": 0.2474,
+    "log_loss_btts": 0.6881,
+    "accuracy_1x2": 0.4684
+   },
+   "value_bets_at_close": {
+    "n_bets": 639,
+    "n_settled": 639,
+    "hit_rate": 0.3505,
+    "staked": 7.893,
+    "pnl": -0.3191,
+    "roi_kelly": -0.0404,
+    "roi_flat": -0.0254,
+    "h2h_roi_flat": 0.0279,
+    "h2h_n": 372,
+    "totals_roi_flat": -0.0996,
+    "totals_n": 267
+   },
    "counts": {
     "corners": {
      "n": 380,
@@ -251,7 +281,7 @@
      "brier_over_constant": 0.2488
     }
    },
-   "data_source": "mirror (no odds)"
+   "data_source": "football-data"
   },
   "LALIGA": {
    "xi": 0.001,
@@ -470,9 +500,39 @@
     "log_loss_btts": 0.6915,
     "accuracy_1x2": 0.4895
    },
-   "market_closing": null,
-   "market_closing_model_same_games": null,
-   "value_bets_at_close": null,
+   "market_closing": {
+    "n": 380,
+    "brier_1x2": 0.5716,
+    "log_loss_1x2": 0.965,
+    "brier_over25": 0.2392,
+    "log_loss_over25": 0.6711,
+    "brier_btts": null,
+    "log_loss_btts": null,
+    "accuracy_1x2": 0.5474
+   },
+   "market_closing_model_same_games": {
+    "n": 380,
+    "brier_1x2": 0.5791,
+    "log_loss_1x2": 0.9759,
+    "brier_over25": 0.247,
+    "log_loss_over25": 0.6869,
+    "brier_btts": 0.2499,
+    "log_loss_btts": 0.6931,
+    "accuracy_1x2": 0.5211
+   },
+   "value_bets_at_close": {
+    "n_bets": 559,
+    "n_settled": 559,
+    "hit_rate": 0.3792,
+    "staked": 6.8583,
+    "pnl": -0.4481,
+    "roi_kelly": -0.0653,
+    "roi_flat": -0.0631,
+    "h2h_roi_flat": -0.1234,
+    "h2h_n": 315,
+    "totals_roi_flat": 0.0147,
+    "totals_n": 244
+   },
    "counts": {
     "corners": {
      "n": 380,
@@ -502,7 +562,7 @@
      "brier_over_constant": 0.2497
     }
    },
-   "data_source": "mirror (no odds)"
+   "data_source": "football-data"
   }
  },
  "overall": {
@@ -571,5 +631,17 @@
    }
   ]
  },
- "overall_value_bets_at_close": null
+ "overall_value_bets_at_close": {
+  "n_bets": 1198,
+  "n_settled": 1198,
+  "hit_rate": 0.3639,
+  "staked": 14.7513,
+  "pnl": -0.7672,
+  "roi_kelly": -0.052,
+  "roi_flat": -0.043,
+  "h2h_roi_flat": -0.0415,
+  "h2h_n": 687,
+  "totals_roi_flat": -0.045,
+  "totals_n": 511
+ }
 }
