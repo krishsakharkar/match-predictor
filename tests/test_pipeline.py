@@ -355,3 +355,22 @@ def test_backfill_past_predicts_from_earlier_data_only(conn):
     got = conn.execute("SELECT payload FROM predictions").fetchall()
     assert all(json.loads(r["payload"])["retro"] for r in got)
     assert teams  # synthetic league is used
+
+
+def test_sync_results_adds_finished_games_never_seen(conn, monkeypatch):
+    from matchpredictor import pipeline
+    from matchpredictor.ingest import odds_api as oa
+    db.upsert_match(conn, {"league": "UCL", "season": "2627", "date": "2026-10-13", "home": "Arsenal",
+                           "away": "Lille", "kickoff_utc": (datetime.now(timezone.utc) - timedelta(hours=3)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                           "odds_api_id": "seen", "status": "SCHEDULED", "source": "odds-api"})
+    ko = (datetime.now(timezone.utc) - timedelta(hours=5)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    monkeypatch.setattr(oa, "scores", lambda conn, sport, days_from=3, ttl_minutes=None: [
+        {"id": "seen", "completed": True, "home_team": "Arsenal", "away_team": "Lille", "commence_time": ko,
+         "scores": [{"name": "Arsenal", "score": "3"}, {"name": "Lille", "score": "0"}]},
+        {"id": "new", "completed": True, "home_team": "RC Lens", "away_team": "Sporting Lisbon", "commence_time": ko,
+         "scores": [{"name": "RC Lens", "score": "0"}, {"name": "Sporting Lisbon", "score": "2"}]},
+    ] if sport == "soccer_uefa_champs_league" else [])
+    pipeline.sync_results(conn, [])
+    rows = {(r["home"], r["away"]): (r["status"], r["fthg"], r["ftag"]) for r in conn.execute("SELECT * FROM matches")}
+    assert rows[("Arsenal", "Lille")] == ("FT", 3, 0)
+    assert rows[("Lens", "Sporting CP")] == ("FT", 0, 2)          # stored under canonical names
