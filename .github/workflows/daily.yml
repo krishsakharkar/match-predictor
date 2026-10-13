@@ -1,0 +1,102 @@
+name: predict
+
+# One hourly tick; `python -m matchpredictor gate` (stdlib only, runs before installing anything)
+# decides whether this tick is the 09:00 ET daily run, a pre-kickoff refresh (a kickoff 45-105 min
+# away), or nothing. Off-hours ticks exit in seconds and spend no API credits.
+on:
+  schedule:
+    - cron: "7 * * * *"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "daily | prekickoff | backtest"
+        default: daily
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: predict
+  cancel-in-progress: false
+
+jobs:
+  predict:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      mode: ${{ steps.gate.outputs.mode }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Decide what to run
+        id: gate
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            mode="${{ github.event.inputs.mode }}"
+          else
+            mode="$(python3 -m matchpredictor gate)"
+          fi
+          echo "mode=$mode" >> "$GITHUB_OUTPUT"
+          echo "Mode: $mode"
+
+      - uses: actions/setup-python@v5
+        if: steps.gate.outputs.mode != 'skip'
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        if: steps.gate.outputs.mode != 'skip'
+        run: pip install -r requirements.txt
+
+      - name: Tests
+        if: steps.gate.outputs.mode != 'skip'
+        run: python -m pytest -q
+
+      - name: Run pipeline
+        if: steps.gate.outputs.mode == 'daily' || steps.gate.outputs.mode == 'prekickoff'
+        env:
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+          API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
+        run: python -m matchpredictor run --mode "${{ steps.gate.outputs.mode }}"
+
+      - name: Backtest (weekly, on demand, or when missing)
+        if: >-
+          steps.gate.outputs.mode == 'backtest' ||
+          (steps.gate.outputs.mode == 'daily' && github.event_name == 'schedule')
+        run: |
+          if [ "${{ steps.gate.outputs.mode }}" = "backtest" ] || [ "$(date -u +%u)" = "1" ] || [ ! -f site/data/backtest.json ]; then
+            [ "${{ steps.gate.outputs.mode }}" = "backtest" ] && python -m matchpredictor history
+            python -m matchpredictor backtest
+          fi
+
+      - name: Commit data
+        if: steps.gate.outputs.mode != 'skip'
+        run: |
+          git config user.name "match-predictor bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add data/match.db site/data/
+          if git diff --cached --quiet; then
+            echo "no changes"
+          else
+            git commit -m "data: ${{ steps.gate.outputs.mode }} run $(date -u +%Y-%m-%dT%H:%MZ)"
+            git push
+          fi
+
+      - uses: actions/upload-pages-artifact@v3
+        if: steps.gate.outputs.mode != 'skip'
+        with:
+          path: site
+
+  deploy:
+    needs: predict
+    if: needs.predict.outputs.mode != 'skip'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
