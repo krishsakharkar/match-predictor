@@ -106,7 +106,11 @@ jobs:
             echo "no changes"
           else
             git commit -m "data: ${{ steps.gate.outputs.mode }} run $(date -u +%Y-%m-%dT%H:%MZ)"
-            git push
+            # another run may have pushed meanwhile: merge it, keeping this run's (newer) data files
+            for i in 1 2 3; do
+              git push && break
+              git pull --no-rebase --no-edit -X ours origin main
+            done
           fi
 
       - uses: actions/upload-pages-artifact@v3
