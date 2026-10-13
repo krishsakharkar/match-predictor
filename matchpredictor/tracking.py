@@ -184,6 +184,8 @@ def tracked_rows(conn) -> list[dict]:
     out = []
     for r in rows:
         pl = json.loads(r["payload"])
+        if pl.get("retro"):
+            continue                     # backfilled after kickoff: not a live prediction
         mk = pl["markets"]
         out.append({"id": r["match_id"], "league": r["league"], "date": r["date"], "home": r["home"],
                     "away": r["away"], "fthg": r["fthg"], "ftag": r["ftag"],

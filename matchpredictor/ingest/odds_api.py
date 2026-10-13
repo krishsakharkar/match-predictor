@@ -68,10 +68,10 @@ def odds(conn, sport: str, force=False) -> list[dict]:
                  ttl=timedelta(minutes=cfg["cache_ttl_minutes"]), force=force)
 
 
-def scores(conn, sport: str, days_from: int = 3) -> list[dict]:
+def scores(conn, sport: str, days_from: int = 3, ttl_minutes: float | None = None) -> list[dict]:
     cfg = config.settings()["odds_api"]
     return _call(conn, f"/sports/{sport}/scores", {"daysFrom": days_from}, cost=2,
-                 ttl=timedelta(minutes=cfg["scores_cache_ttl_minutes"]))
+                 ttl=timedelta(minutes=cfg["scores_cache_ttl_minutes"] if ttl_minutes is None else ttl_minutes))
 
 
 def parse_odds(event: dict, home: str, away: str) -> list[dict]:

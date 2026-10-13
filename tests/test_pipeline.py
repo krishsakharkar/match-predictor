@@ -178,7 +178,7 @@ def test_gate(tmp_path):
     c.commit(); c.close()
     assert schedule.gate(datetime(2026, 10, 17, 13, 7, tzinfo=timezone.utc), p) == "daily"      # 09:07 EDT
     assert schedule.gate(datetime(2026, 10, 17, 12, 7, tzinfo=timezone.utc), p) == "skip"       # 113 min out
-    assert schedule.gate(datetime(2026, 10, 17, 18, 7, tzinfo=timezone.utc), p) == "skip"
+    assert schedule.gate(datetime(2026, 10, 17, 18, 7, tzinfo=timezone.utc), p) == "results"   # 14:00 game, no score yet
     # outside the ET daily hour: 21:00 UTC kickoff, tick at 20:07 -> 53 min out
     c = db.connect(p)
     db.upsert_match(c, {"league": "EPL", "season": "2627", "date": "2026-10-17", "home": "C", "away": "D",
@@ -319,3 +319,39 @@ def test_sync_fixtures_dedupes_by_event(conn, monkeypatch):
     pipeline.sync_fixtures(conn, [])
     rows = conn.execute("SELECT home, away FROM matches WHERE odds_api_id='ev1'").fetchall()
     assert [tuple(r) for r in rows] == [("FC Porto", "Betis")]
+
+
+def test_gate_results_mode(tmp_path):
+    p = tmp_path / "r.db"
+    c = db.connect(p)
+    db.upsert_match(c, {"league": "EPL", "season": "2627", "date": "2026-10-17", "home": "A", "away": "B",
+                        "kickoff_utc": "2026-10-17T14:00:00Z", "status": "SCHEDULED"})
+    c.commit(); c.close()
+    assert schedule.gate(datetime(2026, 10, 17, 17, 7, tzinfo=timezone.utc), p) == "results"   # 3h after
+    assert schedule.gate(datetime(2026, 10, 17, 22, 7, tzinfo=timezone.utc), p) == "skip"      # 8h after
+
+
+def test_retro_predictions_excluded_from_live_tracking(conn):
+    mid = db.upsert_match(conn, {"league": "EPL", "season": "2627", "date": "2026-10-10", "home": "A",
+                                 "away": "B", "status": "FT", "fthg": 1, "ftag": 0})
+    payload = {"markets": {"1x2": {"home": .5, "draw": .3, "away": .2}, "totals": {"2.5": {"over": .5}},
+                           "btts": {"yes": .5}}, "xg": {"home": 1.4, "away": 1.0}, "predicted_score": "1-0",
+               "top_scores": [{"score": "1-0", "prob": .1}]}
+    db.save_prediction(conn, mid, "2026-10-13T00:00:00Z", "x", dict(payload, retro=True))
+    assert tracking.tracked_rows(conn) == []
+    db.save_prediction(conn, mid, "2026-10-13T00:00:00Z", "x", payload)
+    assert len(tracking.tracked_rows(conn)) == 1
+
+
+def test_backfill_past_predicts_from_earlier_data_only(conn):
+    from matchpredictor import pipeline
+    teams = _synthetic_league(conn, seasons=("2425", "2526", "2627"))
+    rows = conn.execute("SELECT id, date FROM matches WHERE season='2627' ORDER BY date LIMIT 3").fetchall()
+    when = datetime.fromisoformat(rows[-1]["date"]).replace(tzinfo=timezone.utc) + timedelta(days=1)
+    cfg = {"xg_weight": 0.0, "blend_weight": 1.0, "rest_coef": 0.0, "fresh_k": 0,
+           **{f: False for f in ("xg", "elo", "rest", "injuries", "referee_penalties")}}
+    n = pipeline.backfill_past(conn, [], cfg, when)
+    assert n > 0
+    got = conn.execute("SELECT payload FROM predictions").fetchall()
+    assert all(json.loads(r["payload"])["retro"] for r in got)
+    assert teams  # synthetic league is used

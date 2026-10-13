@@ -75,7 +75,7 @@ def sync_referees_fd(conn) -> None:
                          (fx["referee"], fx["league"], fx["home"], fx["away"]))
 
 
-def sync_results(conn, notes: list[str]) -> None:
+def sync_results(conn, notes: list[str], ttl_minutes: float | None = None) -> None:
     """Results for shown matches via Odds API /scores (2 credits/competition, cached ~20h, only when needed)."""
     now = now_utc()
     for key, c in config.competitions().items():
@@ -86,7 +86,7 @@ def sync_results(conn, notes: list[str]) -> None:
         if not pending:
             continue
         try:
-            res = odds_api.scores(conn, c["odds_api_sport"], days_from=3)
+            res = odds_api.scores(conn, c["odds_api_sport"], days_from=3, ttl_minutes=ttl_minutes)
         except odds_api.OddsApiUnavailable as e:
             notes.append(f"Results unavailable for {c['name']}: {e}")
             continue
@@ -155,6 +155,42 @@ def raw_absences(conn, match_id: str) -> list[dict]:
     return [dict(r) for r in conn.execute("SELECT team, player, reason FROM absences WHERE match_id=?", (match_id,))]
 
 
+# ---------------------------------------------------------------- backfill
+
+def backfill_past(conn, notes: list[str], cfg: dict, now, book=None, elo_params=None) -> int:
+    """Predict shown matches of the last few days that kicked off before any live prediction existed.
+
+    Each one is predicted as of its match day from earlier data only (no look-ahead) and stored with
+    retro=True: the site labels it 'backfilled' and live accuracy tracking ignores it."""
+    days = config.settings()["display"]["days_back"]
+    df = load_matches(conn)
+    have = {r[0] for r in conn.execute("SELECT match_id FROM predictions")}
+    lo = pd.Timestamp((now - timedelta(days=days)).date())
+    past = df[(df.date >= lo) & (df.date <= pd.Timestamp(now.date())) & ~df.id.isin(have)]
+    past = past[[config.is_displayed(r.league, r.home, r.away) and (
+        (isinstance(r.kickoff_utc, str) and r.kickoff_utc < iso(now)) or r.status == "FT") for r in past.itertuples()]]
+    n = 0
+    for day, chunk in past.groupby("date"):
+        pred = Predictor(df, day.date(), elo_book=book, elo_params=elo_params,
+                         factors={f: cfg[f] for f in ALL_FACTORS}, xg_weight=cfg["xg_weight"] if cfg["xg"] else 0.0,
+                         blend_weight=cfg["blend_weight"], rest_coef=cfg["rest_coef"], with_stats=True)
+        for m in chunk.itertuples():
+            ref = m.referee if isinstance(m.referee, str) else None
+            d = day.strftime("%Y-%m-%d")
+            p = pred.predict(m.league, m.home, m.away, d, referee=ref)
+            if p is None:
+                continue
+            match_markets.build(conn, pred, m.league, m.id, m.home, m.away, m.season, p, ref)
+            p.update({"retro": True, "absences": [], "referee": ref, "lineups_confirmed": False})
+            db.save_prediction(conn, m.id, iso(now), MODEL_VERSION, p)
+            n += 1
+    if n:
+        notes.append(f"Backfilled predictions for {n} recent matches that kicked off before live predictions "
+                     "began (made from pre-match data only; not counted in live accuracy)")
+    conn.commit()
+    return n
+
+
 # ---------------------------------------------------------------- main
 
 def displayed_upcoming(df: pd.DataFrame, now, hours: float | None = None) -> pd.DataFrame:
@@ -169,6 +205,13 @@ def run(conn, mode: str = "daily") -> dict:
     now = now_utc()
     cur = config.season_code(now)
     conn.execute("INSERT INTO runs (started_at, mode) VALUES (?, ?)", (iso(now), mode))
+
+    if mode == "results":          # quick post-match run: scores in, site out
+        sync_results(conn, notes, ttl_minutes=50)
+        conn.commit()
+        from .site import build
+        build(conn, notes)
+        return {"mode": mode, "notes": notes}
 
     if mode == "daily":
         history.refresh(conn, cur, notes)
@@ -227,9 +270,10 @@ def run(conn, mode: str = "daily") -> dict:
         notes.append(f"No strength rating for {len(skipped)} fixtures (no league history or ClubElo rating): "
                      + ", ".join(skipped[:8]))
     conn.commit()
+    n_retro = backfill_past(conn, notes, cfg, now, book, elo_params) if mode == "daily" else 0
 
     from .site import build
     build(conn, notes)
     conn.execute("UPDATE runs SET notes=? WHERE started_at=? AND mode=?", ("\n".join(notes), iso(now), mode))
-    return {"mode": mode, "predictions": n_pred, "notes": notes,
+    return {"mode": mode, "predictions": n_pred, "backfilled": n_retro, "notes": notes,
             "tracked": tracking.score_predictions(tracking.tracked_rows(conn)).get("n", 0)}
