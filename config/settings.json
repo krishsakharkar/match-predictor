@@ -186,5 +186,8 @@
     "enabled": true,
     "window_days": 365,
     "refit_days": 14
+  },
+  "bankers": {
+    "threshold": 0.7
   }
 }

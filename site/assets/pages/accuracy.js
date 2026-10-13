@@ -1,106 +1,10 @@
-/* match-predictor (Phase A): W/D/L and scoreline predictions. Renders from data/*.json. */
+/* Page: Accuracy — backtest summary, factor ablation, calibration, live tracking, match-by-match. */
 (function () {
   "use strict";
-  const page = document.body.dataset.page;
   const app = document.getElementById("app");
-
-  // ---------- helpers ----------
-  const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-  const pct = (p, d = 0) => (p == null ? "–" : (p * 100).toFixed(d) + "%");
-  const num = (x, d = 3) => (x == null ? "–" : Number(x).toFixed(d));
-  const dash = s => esc(String(s || "").replace("-", "–"));
-  const store = {
-    get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
-    set(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* ignore */ } },
-  };
-  const localDay = m => (m.kickoff_utc ? new Date(m.kickoff_utc) : new Date(m.date + "T12:00:00Z"));
-  const dayKey = d => d.toLocaleDateString(undefined, { year: "numeric", month: "2-digit", day: "2-digit" });
-  function dayLabel(d) {
-    const t = new Date(), y = new Date(); y.setDate(t.getDate() - 1);
-    const tm = new Date(); tm.setDate(t.getDate() + 1);
-    if (dayKey(d) === dayKey(t)) return "Today";
-    if (dayKey(d) === dayKey(tm)) return "Tomorrow";
-    if (dayKey(d) === dayKey(y)) return "Yesterday";
-    return d.toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "short" });
-  }
-  const timeOf = m => (m.kickoff_utc ? new Date(m.kickoff_utc).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" }) : "");
-  async function load(path) {
-    const r = await fetch(path, { cache: "no-cache" });
-    if (!r.ok) throw new Error(`${path}: HTTP ${r.status}`);
-    return r.json();
-  }
-  const fail = e => {
-    const missing = /HTTP 404/.test(e.message);
-    app.innerHTML = `<div class="empty">${missing ? "No data yet. The pipeline hasn't run." : "Could not load data."}<br><span class="small">${esc(e.message)}</span></div>`;
-  };
-  const notesBlock = d => (!d.notes || !d.notes.length) ? "" :
-    `<details class="notes"><summary>Data notes (${d.notes.length})</summary><ul>${d.notes.map(n => `<li>${esc(n)}</li>`).join("")}</ul></details>`;
-  const badge = (ok, label) => `<span class="badge ${ok ? "hit" : "miss"}">${ok ? "✓" : "✗"} ${label}</span>`;
-
-  // ---------- match card ----------
-  function card(m) {
-    const p = m.prediction;
-    let right = `<span class="muted">TBD</span>`;
-    if (m.result) right = `<b>FT ${m.result.home}–${m.result.away}</b>`;
-    else if (m.status === "SCHEDULED" && m.kickoff_utc && m.kickoff_utc < new Date().toISOString()) right = `<span class="muted">awaiting result</span>`;
-    let body = `<div class="muted small" style="margin-top:8px">No prediction (no rating available for one of the teams).</div>`;
-    if (p) {
-      const abs = (p.absences || []).filter(a => a.status === "out" || a.status === "bench");
-      const keyAbs = abs.sort((a, b) => (b.gk - a.gk) || ((b.attack_share || 0) - (a.attack_share || 0))).slice(0, 4);
-      body = `
-        <div class="wdl"><div class="wdl-bar"><span class="h" style="width:${p.p_home * 100}%"></span><span class="d" style="width:${p.p_draw * 100}%"></span><span class="a" style="width:${p.p_away * 100}%"></span></div>
-          <div class="wdl-labels"><span><b>${pct(p.p_home)}</b> win</span><span>draw <b>${pct(p.p_draw)}</b></span><span>win <b>${pct(p.p_away)}</b></span></div></div>
-        <div class="scores">${p.top_scores.map((t, i) => `<span class="score-chip ${i === 0 ? "top" : ""}">${dash(t.score)} <span class="muted">${pct(t.prob)}</span></span>`).join("")}</div>
-        <div class="meta small">
-          ${keyAbs.length ? `<div><span class="muted">Key absences:</span> ${keyAbs.map(a => `${esc(a.player)}${a.gk ? " (GK)" : ""}${a.status === "bench" ? " (bench)" : ""} <span class="muted">${esc(a.team)}</span>`).join(", ")}${p.lineups_confirmed ? ` <span class="badge">lineups confirmed</span>` : ""}</div>` : ""}
-          <div><span class="muted">Referee:</span> ${m.referee ? esc(m.referee) : "not announced"}</div>
-          <div class="muted">xG ${num(p.xg.home, 2)}–${num(p.xg.away, 2)} · ${esc(p.source || "")}${(p.thin_data || []).length ? ` · thin data: ${esc(p.thin_data.join(", "))}` : ""}</div>
-        </div>
-        ${m.hit ? `<div class="hits">${badge(m.hit.result, "result")} ${badge(m.hit.exact, "exact score")} ${badge(m.hit.top3, "top 3")}</div>` : ""}`;
-    }
-    return `<article class="card">
-      <div class="card-head"><span class="comp">${esc(m.badge)}</span><span>${esc(timeOf(m))}</span></div>
-      <div class="teams"><div class="team">${esc(m.home)}</div>
-        <div class="score">${p ? `<div class="pred">${dash(p.predicted_score)}</div><div class="label">most likely</div>` : ""}<div class="result">${right}</div></div>
-        <div class="team away">${esc(m.away)}</div></div>
-      ${body}
-    </article>`;
-  }
-
-  function grouped(list) {
-    const groups = [];
-    for (const m of list) {
-      const d = localDay(m), k = dayKey(d);
-      if (!groups.length || groups[groups.length - 1].k !== k) groups.push({ k, label: dayLabel(d), items: [] });
-      groups[groups.length - 1].items.push(m);
-    }
-    return groups.map(g => `<h3 class="day">${esc(g.label)}</h3>${g.items.map(card).join("")}`).join("");
-  }
-
-  async function indexPage() {
-    const d = await load("data/predictions.json");
-    const key = "mp.comp";
-    let cur = store.get(key) || "all";
-    const order = Object.keys(d.competitions);
-    const present = [...new Set(d.matches.map(m => m.comp))].sort((a, b) => order.indexOf(a) - order.indexOf(b));
-    if (cur !== "all" && cur !== "mine" && !present.includes(cur)) cur = "all";
-    const tracked = new Set(d.tracked_teams || []);
-    const draw = () => {
-      const chips = [["all", "All"], ["mine", "Tracked clubs"], ...present.map(c => [c, (d.competitions[c] || {}).badge || c])]
-        .map(([k, n]) => `<button class="chip ${k === cur ? "on" : ""}" data-c="${esc(k)}">${esc(n)}</button>`).join("");
-      const ms = d.matches.filter(m => cur === "all" || (cur === "mine" ? (tracked.has(m.home) || tracked.has(m.away)) : m.comp === cur));
-      const now = new Date().toISOString();
-      const upcoming = ms.filter(m => !m.result && (!m.kickoff_utc || m.kickoff_utc > now));
-      const played = ms.filter(m => !upcoming.includes(m)).sort((a, b) => (localDay(b) - localDay(a)));
-      app.innerHTML = `${notesBlock(d)}<div class="filters">${chips}</div>
-        <h2>Upcoming</h2>${upcoming.length ? grouped(upcoming) : `<div class="empty">No fixtures in the next 7 days.</div>`}
-        <h2>Results</h2>${played.length ? grouped(played) : `<div class="empty">No results in the last 7 days.</div>`}
-        <p class="muted small">Updated ${esc(new Date(d.generated_at).toLocaleString())} · model ${esc(d.model_version)}</p>`;
-      app.querySelectorAll("[data-c]").forEach(b => b.addEventListener("click", () => { cur = b.dataset.c; store.set(key, cur); draw(); }));
-    };
-    draw();
-  }
-
+  const { esc, pct, dash } = MP;
+  const num = (x, d = 3) => MP.num(x, d);
+  const load = MP.load;
   // ---------- accuracy page ----------
   const tile = (k, v, s) => `<div class="tile"><div class="k">${k}</div><div class="v">${v}</div>${s ? `<div class="s">${s}</div>` : ""}</div>`;
   const metricTiles = (m, mk) => `<div class="tiles">
@@ -149,6 +53,16 @@
         ${Object.entries(bl).filter(([, v]) => v.model && v.model.n).map(([k, v]) => `<tr><td class="l">${esc(k)}</td><td>${v.model.n}</td><td>${pct(v.model.accuracy_1x2, 1)}</td><td>${pct(v.model.exact_score_hit, 1)}</td><td>${pct(v.model.top3_score_hit, 1)}</td><td>${num(v.model.log_loss_1x2)}</td><td>${v.market && v.market.n ? num(v.market.log_loss_1x2) : "n/a"}</td></tr>`).join("")}
         </table></div>`;
       if (bt.ucl) html += `<h2>Champions League · ${esc(bt.ucl.season_label)}</h2>${metricTiles(bt.ucl.selected)}<p class="muted small">${esc(bt.ucl.method || "")}, refitted weekly on earlier results only.${bt.ucl.elo_only ? ` Elo only: result ${pct(bt.ucl.elo_only.accuracy_1x2)}, log loss ${num(bt.ucl.elo_only.log_loss_1x2)}.` : ""}</p>`;
+      if (bt.bankers) html += `<h2>Bankers: only the most confident picks</h2><div class="table-wrap"><table><tr><th class="l">Favourite at least</th><th>Matches</th><th>Share of all</th><th>Correct</th></tr>
+        ${Object.entries(bt.bankers).map(([k, v]) => `<tr><td class="l">${pct(Number(k))}</td><td>${v.n}</td><td>${pct(v.share, 1)}</td><td>${v.hit == null ? "–" : pct(v.hit, 1)}</td></tr>`).join("")}</table></div>
+        <p class="muted small">Higher confidence means more correct picks but far fewer of them. Draws (about 1 in 4 matches) make a high hit rate on every match impossible.</p>`;
+      const mk = bt.markets && bt.markets.markets;
+      if (mk && Object.keys(mk).length) {
+        const names = { corners: "Corners", cards: "Cards", shots: "Shots", sot: "Shots on target" };
+        html += `<h2>Corners, cards and shots · ${esc(bt.markets.season_label)}</h2><div class="table-wrap"><table><tr><th class="l">Market</th><th>n</th><th>Line</th><th>Avg error</th><th>Pred / actual</th><th>Right side</th><th>Brier</th><th>Baseline</th></tr>
+          ${Object.entries(mk).map(([k, v]) => `<tr><td class="l">${esc(names[k] || k)}</td><td>${v.n}</td><td>${v.line}</td><td>${num(v.mae_total, 2)}</td><td>${num(v.mean_pred, 1)} / ${num(v.mean_actual, 1)}</td><td>${pct(v.side_hit, 1)}</td><td class="${v.brier < v.brier_baseline ? "pos" : "neg"}">${num(v.brier, 4)}</td><td>${num(v.brier_baseline, 4)}</td></tr>`).join("")}</table></div>
+          <p class="muted small">"Right side" = how often the more likely side of the main over/under line won. Baseline = always predicting last season's over rate; a model Brier below it means real skill. Player markets aren't backtested (no per-match player data).</p>`;
+      }
       html += `<h2>Calibration</h2>${calibrationTable(t.calibration_1x2)}`;
     } else html += `<div class="empty">No backtest yet.</div>`;
 
@@ -180,5 +94,5 @@
     }
   }
 
-  ({ index: indexPage, accuracy: accuracyPage }[page] || indexPage)().catch(fail);
+  accuracyPage().catch(e => MP.fail(app, e));
 })();

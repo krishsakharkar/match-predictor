@@ -363,6 +363,7 @@ def run(conn, season: str | None = None, notes: list[str] | None = None, refit_d
             }
     else:
         notes.append("Backtest: no Champions League results in the data - UCL not evaluated")
+    rep["bankers"] = bankers(sel_rows)
     rep["notes"] = notes
     rep["summary"] = plain_summary(rep)
     rep["recommended_settings"] = {
@@ -468,3 +469,15 @@ def rolling_tune(conn, notes: list[str], days: int = 365, refit_days: int = 14, 
                      f"recent matches): {keep}")
     conn.commit()
     return entry
+
+
+def bankers(rows: list[dict], thresholds=(0.6, 0.65, 0.7, 0.75, 0.8)) -> dict:
+    """Hit rate when only predicting matches whose favourite clears a probability threshold."""
+    out = {}
+    for th in thresholds:
+        sub = [r for r in rows if max(r["p_home"], r["p_draw"], r["p_away"]) >= th]
+        hits = [max(("home", "draw", "away"), key=lambda k: r[f"p_{k}"]) == tracking.outcome_1x2(r["fthg"], r["ftag"])
+                for r in sub]
+        out[str(th)] = {"n": len(sub), "share": round(len(sub) / len(rows), 4) if rows else 0,
+                        "hit": round(float(np.mean(hits)), 4) if hits else None}
+    return out

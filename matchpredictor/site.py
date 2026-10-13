@@ -58,6 +58,19 @@ def _rows(conn, lo: str, hi: str):
         "WHERE m.date >= ? AND m.date <= ? ORDER BY COALESCE(m.kickoff_utc, m.date)", (lo, hi)).fetchall()
 
 
+def _bankers_meta() -> dict:
+    th = config.settings().get("bankers", {}).get("threshold", 0.7)
+    meta = {"threshold": th}
+    bt = config.SITE_DIR / "data" / "backtest.json"
+    try:
+        hist = json.loads(bt.read_text()).get("bankers", {}).get(str(th))
+        if hist and hist.get("n"):
+            meta["history"] = hist
+    except (OSError, ValueError):
+        pass
+    return meta
+
+
 def build(conn, notes: list[str] | None = None) -> dict:
     data_dir = config.SITE_DIR / "data"
     data_dir.mkdir(parents=True, exist_ok=True)
@@ -73,7 +86,7 @@ def build(conn, notes: list[str] | None = None) -> dict:
     meta = {"generated_at": iso(now), "version": __version__, "model_version": MODEL_VERSION, "notes": notes or [],
             "factors": config.settings()["factors"], "odds_api_credits_remaining": last_remaining(conn, "odds_api"),
             "competitions": {k: {"name": v["name"], "badge": v["badge"]} for k, v in config.competitions().items()},
-            "tracked_teams": config.settings()["tracked_teams"]}
+            "tracked_teams": config.settings()["tracked_teams"], "bankers": _bankers_meta()}
     (data_dir / "predictions.json").write_text(
         json.dumps({**meta, "matches": matches}, separators=(",", ":"), default=str))
 

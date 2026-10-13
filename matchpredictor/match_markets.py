@@ -3,7 +3,7 @@ models fitted with their count models). Each market's maths lives in its own mod
 from __future__ import annotations
 
 from . import config
-from .absences import absent_names
+from .absences import absent_names, covered
 from .models import cards, corners, players as player_model, shots
 from .models.counts import STATS
 
@@ -23,7 +23,7 @@ def player_context(conn, league: str | None, season: str, team: str) -> tuple[li
             "WHERE league=? AND season=? AND team=?", (league, s, team))]
         games = conn.execute("SELECT COUNT(*) FROM matches WHERE league=? AND season=? AND status='FT' "
                              "AND (home=? OR away=?)", (league, s, team, team)).fetchone()[0]
-        if rows and games >= 5:
+        if rows and games >= 5 and covered(conn, league, s, team, rows):
             return rows, games
     return [], 0
 
