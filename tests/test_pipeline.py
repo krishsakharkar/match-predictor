@@ -7,8 +7,9 @@ import pytest
 
 from matchpredictor import config, db, schedule, tracking
 from matchpredictor.ingest import football_data, odds_api
-from matchpredictor.pipeline import evaluate_value, latest_odds, normalise_referee
-from matchpredictor.predict import fit_league, load_matches, predict_match
+from matchpredictor.betting import evaluate_value, latest_odds
+from matchpredictor.ingest.api_football import normalise_referee
+from matchpredictor.predict import Predictor, fit_league, load_matches, predict_match
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -137,7 +138,7 @@ def test_bet_lifecycle(conn):
     conn.execute("INSERT INTO odds_snapshots (match_id, fetched_at, bookmaker, market, selection, line, price) "
                  "VALUES (?, '2026-01-01T09:00:00Z', 'fanduel', 'h2h', 'home', NULL, 2.4), "
                  "(?, '2026-01-01T14:10:00Z', 'fanduel', 'h2h', 'home', NULL, 2.2)", (mid, mid))
-    from matchpredictor.pipeline import log_bets
+    from matchpredictor.betting import log_bets
     a = {"market": "h2h", "selection": "home", "line": None, "model_prob": 0.5, "market_prob": 0.4,
          "price": 2.4, "edge": 0.25, "ev": 0.2, "stake": 0.02, "is_value": True}
     log_bets(conn, mid, [a], "2026-01-01T09:00:00Z")
@@ -222,30 +223,85 @@ def test_fit_and_predict_offline(conn):
     assert model is not None
     assert "NEWCO" in model.promoted
     strong, weak = teams[-1], teams[0]
-    p = predict_match(model, strong, weak, referee="Ref1")
+    p = predict_match(model, strong, weak)
     mk = p["markets"]
     assert sum(mk["1x2"].values()) == pytest.approx(1.0, abs=1e-3)
     assert mk["1x2"]["home"] > mk["1x2"]["away"]
     assert p["fair_odds"]["1x2"]["home"] == pytest.approx(1 / mk["1x2"]["home"], rel=1e-3)
-    for stat in ("corners", "sot", "cards"):
-        tl = p["stats"][stat]["total_lines"]
-        for v in tl.values():
-            assert v["over"] + v["under"] == pytest.approx(1.0, abs=1e-3)
+    assert len(p["top_scores"]) == 3 and p["top_scores"][0]["score"] == p["predicted_score"]
     # promoted team with no history falls back to the prior, i.e. is predicted to be weak
     q = predict_match(model, teams[5], "NEWCO")
     assert q["markets"]["1x2"]["home"] > q["markets"]["1x2"]["away"]
     assert q["promoted"]["away"] is True
-    # absences reduce expected goals
-    r = predict_match(model, strong, weak, absences={"home": [0.4]})
-    assert r["xg"]["home"] < p["xg"]["home"]
 
 
-def test_backtest_runs_on_synthetic(conn):
+def test_predictor_league_factors_and_absences(conn):
+    teams = _synthetic_league(conn)
+    df = load_matches(conn)
+    strong, weak = teams[-1], teams[0]
+    off = {f: False for f in ("xg", "elo", "rest", "injuries", "referee_penalties")}
+    pr = Predictor(df, date(2026, 8, 1), factors=dict(off, injuries=True))
+    p = pr.predict("EPL", strong, weak, "2026-08-15")
+    assert p["source"] == "Dixon-Coles" and p["factors"] == {}
+    assert sum((p["markets"]["1x2"][k] for k in ("home", "draw", "away"))) == pytest.approx(1, abs=1e-3)
+    eff = {"home": {"attack": 0.8, "defence": 1.1, "players": []}}
+    q = pr.predict("EPL", strong, weak, "2026-08-15", absences=eff)
+    assert q["xg"]["home"] == pytest.approx(p["xg"]["home"] * 0.8, rel=1e-3)
+    assert q["xg"]["away"] == pytest.approx(p["xg"]["away"] * 1.1, rel=1e-3)
+    # injuries switched off -> absences ignored
+    pr2 = Predictor(df, date(2026, 8, 1), factors=off, models=pr.models)
+    assert pr2.predict("EPL", strong, weak, "2026-08-15", absences=eff)["xg"] == p["xg"]
+    # no ClubElo and teams from no league -> no prediction rather than a guess
+    assert pr.predict("UCL", "Nowhere A", "Nowhere B", "2026-09-15") is None
+
+
+def test_predictor_uses_elo_cross_league(conn):
+    teams = _synthetic_league(conn)
+    df = load_matches(conn)
+    book = _FakeElo({teams[-1]: 1900, teams[0]: 1500, "Galatasaray": 1700})
+    pr = Predictor(df, date(2026, 8, 1), elo_book=book, factors={"elo": True, "rest": False, "xg": False,
+                                                                 "injuries": False, "referee_penalties": False},
+                   elo_params={"alpha_home": 0.3, "alpha_away": 0.05, "beta": 0.12, "hfa": {"UCL": 0.05}})
+    p = pr.predict("UCL", "Galatasaray", teams[-1], "2026-09-15")
+    assert p is not None and p["source"] in ("Elo", "Elo + league ratings")
+    assert p["markets"]["1x2"]["away"] > p["markets"]["1x2"]["home"]
+    lg = pr.predict("EPL", teams[-1], teams[0], "2026-08-15")
+    assert lg["source"] == "Dixon-Coles + Elo"
+
+
+class _FakeElo:
+    """Minimal stand-in for ingest.clubelo.EloBook."""
+    def __init__(self, ratings):
+        self.r = ratings
+
+    def __bool__(self):
+        return True
+
+    def club_for(self, team, country=None):
+        return team if team in self.r else None
+
+    def team_rating(self, team, day, country=None):
+        return self.r.get(team)
+
+    def last_match(self, club, day):
+        return None
+
+
+def test_backtest_pipeline_on_synthetic(conn):
     from matchpredictor import backtest
     _synthetic_league(conn, seasons=("2324", "2425", "2526"))
     df = load_matches(conn)
-    rows = backtest.walk_forward(df, "EPL", "2526", refit_days=28)
+    elo_p = config.settings()["elo"]["default_params"]
+    rows = backtest.collect_league(df, conn, None, "EPL", "2526", [0.0], elo_p, refit_days=28)
     assert len(rows) > 100
-    m = tracking.score_predictions(rows)
-    base = tracking.score_predictions(backtest.baseline_rows(df, "EPL", "2526", rows))
-    assert m["brier_1x2"] < base["brier_1x2"]            # real signal in synthetic data is learnt
+    base = {"xg_weight": 0.0, "blend_weight": 1.0, "rest_coef": 0.0, "elo_params": elo_p,
+            **{f: False for f in ("xg", "elo", "rest", "injuries", "referee_penalties")}}
+    scored = backtest.evaluate(rows, base)
+    m = tracking.score_predictions(scored)
+    assert m["n"] == len(rows)
+    assert 0 <= m["exact_score_hit"] <= m["top3_score_hit"] <= 1
+    naive = [dict(r, p_home=0.45, p_draw=0.27, p_away=0.28) for r in scored]
+    assert m["brier_1x2"] < tracking.score_predictions(naive)["brier_1x2"]   # real signal is learnt
+    cfg, log = backtest.tune(rows, base, [])
+    assert cfg["xg"] is False and log["xg"]["available"] is False           # no xG in synthetic data
+    assert log["elo"]["available"] is False

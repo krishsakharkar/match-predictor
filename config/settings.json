@@ -15,11 +15,24 @@
       0.003,
       0.005,
       0.0075
+    ],
+    "xg_weight": 0.5,
+    "xg_weight_grid": [
+      0.0,
+      0.25,
+      0.5,
+      0.75,
+      1.0
     ]
   },
   "injuries": {
     "replacement_retention": 0.5,
-    "min_multiplier": 0.75
+    "min_multiplier": 0.75,
+    "gk_penalty": 0.06,
+    "defender_penalty": 0.08,
+    "regular_minutes_share": 0.4,
+    "bench_weight": 0.5,
+    "fresh_absence_matches": 3
   },
   "value": {
     "min_edge": 0.05,
@@ -32,15 +45,21 @@
   "odds_api": {
     "region": "us",
     "bookmakers": "fanduel",
-    "markets": "h2h,totals",
+    "markets": "h2h",
     "cache_ttl_minutes": 50,
-    "scores_cache_ttl_minutes": 180,
-    "reserve_credits": 40
+    "scores_cache_ttl_minutes": 1200,
+    "reserve_credits": 40,
+    "daily_horizon_hours": 48,
+    "prekickoff_horizon_hours": 3,
+    "event_markets": "btts,alternate_totals,team_totals",
+    "event_markets_max_credits_per_day": 0,
+    "fetch_odds": false
   },
   "api_football": {
     "cache_ttl_hours": 24,
     "daily_limit": 100,
-    "reserve_requests": 10
+    "reserve_requests": 10,
+    "min_interval_seconds": 6.5
   },
   "schedule": {
     "daily_hour_et": 9,
@@ -92,6 +111,71 @@
     "cards_team": [
       1.5,
       2.5
+    ],
+    "shots_total": [
+      20.5,
+      22.5,
+      24.5,
+      26.5
+    ],
+    "shots_team": [
+      9.5,
+      11.5,
+      13.5,
+      15.5
     ]
-  }
+  },
+  "tracked_teams": [
+    "Barcelona",
+    "Real Madrid",
+    "Ath Madrid",
+    "Bayern Munich",
+    "Paris SG",
+    "Dortmund",
+    "Inter",
+    "Man United",
+    "Man City",
+    "Liverpool",
+    "Arsenal",
+    "Chelsea",
+    "Tottenham"
+  ],
+  "display": {
+    "days_back": 7,
+    "days_ahead": 7
+  },
+  "elo": {
+    "blend_weight_dc": 0.5,
+    "default_params": {
+      "alpha_home": 0.36,
+      "alpha_away": 0.08,
+      "beta": 0.0013
+    },
+    "history_refresh_days": 30,
+    "request_pause_seconds": 0.3,
+    "blend_weight_grid": [
+      0.0,
+      0.25,
+      0.5,
+      0.75,
+      1.0
+    ]
+  },
+  "rest": {
+    "floor_days": 2,
+    "cap_days": 7,
+    "coef": 0.0
+  },
+  "referee": {
+    "penalty_goal_value": 0.76,
+    "shrink_games": 20
+  },
+  "factors": {
+    "xg": true,
+    "elo": true,
+    "injuries": true,
+    "rest": true,
+    "referee_penalties": true
+  },
+  "phase": "A"
 }

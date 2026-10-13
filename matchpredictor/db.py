@@ -24,12 +24,17 @@ CREATE TABLE IF NOT EXISTS matches (
     hy INTEGER, ay INTEGER, hr INTEGER, ar INTEGER,
     referee TEXT,
     close_h REAL, close_d REAL, close_a REAL, close_o25 REAL, close_u25 REAL,
+    xg_home REAL, xg_away REAL,        -- Understat expected goals
+    understat_id TEXT,
+    pens_home INTEGER, pens_away INTEGER,   -- penalties awarded (API-Football events, when available)
     odds_api_id TEXT,
     api_football_id INTEGER,
     source TEXT,
     updated_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_matches_league_date ON matches(league, date);
+CREATE INDEX IF NOT EXISTS idx_matches_home_date ON matches(home, date);
+CREATE INDEX IF NOT EXISTS idx_matches_away_date ON matches(away, date);
 
 CREATE TABLE IF NOT EXISTS odds_snapshots (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -100,7 +105,7 @@ CREATE TABLE IF NOT EXISTS player_stats (
     team TEXT NOT NULL,
     player_id INTEGER NOT NULL,
     player TEXT NOT NULL,
-    apps INTEGER, minutes INTEGER, goals INTEGER, shots INTEGER, sot INTEGER,
+    apps INTEGER, minutes INTEGER, goals INTEGER, shots INTEGER, sot INTEGER, assists INTEGER,
     updated_at TEXT NOT NULL,
     PRIMARY KEY(league, season, player_id)
 );
@@ -121,6 +126,35 @@ CREATE TABLE IF NOT EXISTS lineups (
     PRIMARY KEY(match_id, team)
 );
 
+CREATE TABLE IF NOT EXISTS understat_players (
+    league TEXT NOT NULL,
+    season TEXT NOT NULL,
+    player_id INTEGER NOT NULL,
+    player TEXT NOT NULL,
+    team TEXT NOT NULL,
+    position TEXT,                     -- Understat position string, 'GK' for goalkeepers
+    games INTEGER, minutes INTEGER, goals INTEGER, xg REAL, npxg REAL, assists INTEGER, xa REAL, shots INTEGER,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY(league, season, player_id)
+);
+
+CREATE TABLE IF NOT EXISTS elo_ratings (
+    club TEXT NOT NULL,                -- ClubElo club name
+    country TEXT,
+    level INTEGER,
+    elo REAL NOT NULL,
+    date_from TEXT NOT NULL,           -- rating valid from..to inclusive (ClubElo intervals)
+    date_to TEXT NOT NULL,
+    PRIMARY KEY(club, date_from)
+);
+CREATE INDEX IF NOT EXISTS idx_elo_club_to ON elo_ratings(club, date_to);
+
+CREATE TABLE IF NOT EXISTS model_params (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,               -- JSON
+    updated_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS runs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     started_at TEXT NOT NULL,
@@ -128,6 +162,12 @@ CREATE TABLE IF NOT EXISTS runs (
     notes TEXT
 );
 """
+
+
+# Columns added after the first release; CREATE TABLE IF NOT EXISTS won't add them to an existing DB.
+MIGRATIONS = [("player_stats", "assists", "INTEGER"), ("matches", "xg_home", "REAL"), ("matches", "xg_away", "REAL"),
+              ("matches", "understat_id", "TEXT"), ("matches", "pens_home", "INTEGER"),
+              ("matches", "pens_away", "INTEGER")]
 
 
 def connect(path: Path | str | None = None) -> sqlite3.Connection:
@@ -138,6 +178,10 @@ def connect(path: Path | str | None = None) -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     conn.executescript(SCHEMA)
+    for table, col, typ in MIGRATIONS:
+        cols = {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
+        if col not in cols:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {typ}")
     return conn
 
 
@@ -151,8 +195,24 @@ def session(path: Path | str | None = None):
         conn.close()
 
 
-def match_id(league: str, season: str, home: str, away: str) -> str:
+def match_id(league: str, season: str, home: str, away: str, date: str | None = None) -> str:
+    """League pairings happen once per season, so league ids omit the date (sources merge even if a
+    game is rescheduled). Cup and European ties can repeat (two legs, league phase + knockouts),
+    so their ids include the date."""
+    comp = config.competitions(enabled_only=False).get(league)
+    if comp and comp["type"] != "league":
+        return f"{league}:{date}:{home}:{away}"
     return f"{league}:{season}:{home}:{away}"
+
+
+def get_param(conn, key: str):
+    row = conn.execute("SELECT value FROM model_params WHERE key=?", (key,)).fetchone()
+    return json.loads(row["value"]) if row else None
+
+
+def set_param(conn, key: str, value, updated_at: str) -> None:
+    conn.execute("INSERT INTO model_params (key, value, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE "
+                 "SET value=excluded.value, updated_at=excluded.updated_at", (key, json.dumps(value), updated_at))
 
 
 MATCH_COLUMNS = [
@@ -160,13 +220,13 @@ MATCH_COLUMNS = [
     "fthg", "ftag", "hs", "as_", "hst", "ast", "hc", "ac", "hf", "af",
     "hy", "ay", "hr", "ar", "referee",
     "close_h", "close_d", "close_a", "close_o25", "close_u25",
-    "odds_api_id", "api_football_id", "source",
+    "odds_api_id", "api_football_id", "source", "xg_home", "xg_away", "understat_id", "pens_home", "pens_away",
 ]
 
 
 def upsert_match(conn: sqlite3.Connection, row: dict) -> str:
     """Insert or merge a match. Non-null incoming values overwrite; nulls never erase data."""
-    mid = match_id(row["league"], row["season"], row["home"], row["away"])
+    mid = match_id(row["league"], row["season"], row["home"], row["away"], row.get("date"))
     cols = [c for c in MATCH_COLUMNS if c in row]
     placeholders = ", ".join("?" for _ in cols)
     special = {
