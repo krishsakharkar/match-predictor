@@ -80,7 +80,7 @@ class Client:
         errors = body.get("errors")
         if errors:
             msg = "; ".join(f"{k}: {v}" for k, v in errors.items()) if isinstance(errors, dict) else str(errors)
-            if isinstance(errors, dict) and ("plan" in errors or "token" in errors or "requests" in errors):
+            if isinstance(errors, dict) and any(k in errors for k in ("plan", "token", "requests", "access")):
                 self.disabled_reason = msg       # plan/quota errors will repeat: stop for this run
             raise ApiFootballUnavailable(msg)
         resp = body["response"]

@@ -179,10 +179,31 @@ def backfill_api_football(conn, notes: list[str], seasons=(2022, 2023, 2024)) ->
     return out
 
 
+# ---------------------------------------------------------------- committed seed history
+
+SEED_DIR = config.DATA_DIR / "history"
+
+
+def load_seed(conn) -> int:
+    """Results committed to the repo (data/history/*.csv), e.g. past Champions League seasons, so the
+    cross-league model works even when no live source for them is available."""
+    import csv
+    n = 0
+    for path in sorted(SEED_DIR.glob("*.csv")):
+        for r in csv.DictReader(open(path, encoding="utf-8")):
+            db.upsert_match(conn, {"league": r["competition"], "season": r["season"], "date": r["date"],
+                                   "kickoff_utc": r.get("kickoff_utc") or None, "home": r["home"], "away": r["away"],
+                                   "status": "FT", "fthg": int(r["home_goals"]), "ftag": int(r["away_goals"]),
+                                   "referee": r.get("referee") or None, "source": "seed"})
+            n += 1
+    conn.commit()
+    return n
+
+
 # ---------------------------------------------------------------- everything
 
 def refresh(conn, current: str, notes: list[str], backtest: bool = False) -> dict:
-    out = {"football_data": football_data.update_history(conn, current, notes)}
+    out = {"seed": load_seed(conn), "football_data": football_data.update_history(conn, current, notes)}
     conn.commit()
     out["understat"] = understat.update(conn, current, notes)
     conn.commit()

@@ -29,6 +29,7 @@ def card(r, pred: dict | None) -> dict:
                            (pred.get("top_scores") or pred["markets"]["correct_score"])[:3]],
             "xg": pred["xg"], "source": pred.get("source"), "factors": pred.get("factors", {}),
             "absences": pred.get("absences", []), "lineups_confirmed": pred.get("lineups_confirmed", False),
+            "thin_data": pred.get("thin_data", []),
             "predicted_at": r["predicted_at"],
         }
         m["referee"] = m["referee"] or pred.get("referee")

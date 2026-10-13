@@ -134,6 +134,59 @@ def fit_league(df: pd.DataFrame, league: str, as_of: date, xi: float | None = No
                        league_avgs=avgs, xg_weight=xg_weight)
 
 
+@dataclass
+class JointModel:
+    """One Dixon-Coles fit over every modelled league plus European competition results.
+
+    European games link the leagues onto one scale, so this rates any pairing (Champions League,
+    cups between leagues) without ClubElo. Clubs never seen get the average rating of the clubs that
+    only appear in Europe (outside the modelled leagues)."""
+    goals: dc.DixonColes
+    unknown: tuple[float, float]
+
+    def expected_goals(self, home: str, away: str, hfa: bool = True) -> tuple[float, float]:
+        g, idx = self.goals, self.goals.index
+
+        def r(t):
+            i = idx.get(t)
+            return self.unknown if i is None else (float(g.attack[i]), float(g.defence[i]))
+
+        (ah, dh), (aa, da) = r(home), r(away)
+        return (float(np.exp(g.intercept + (g.home_adv if hfa else 0.0) + ah + da)),
+                float(np.exp(g.intercept + aa + dh)))
+
+    def knows(self, team: str) -> bool:
+        return team in self.goals.index
+
+
+def fit_joint(df: pd.DataFrame, as_of: date, xg_weight: float = 0.0, xi: float = 0.003,
+              years: int = 4) -> JointModel | None:
+    comps = config.competitions()
+    europe = [k for k, v in comps.items() if v["type"] == "europe"]
+    lgs = list(config.leagues())
+    as_of_ts = pd.Timestamp(as_of)
+    h = df[(df.status == "FT") & df.fthg.notna() & df.league.isin(lgs + europe) & (df.date < as_of_ts)
+           & (df.date >= as_of_ts - pd.Timedelta(days=365 * years))]
+    if not h.league.isin(europe).any():
+        return None
+    w = dc.time_weights((as_of_ts - h.date).dt.days.to_numpy(), xi)
+    yh, ya = h.fthg.to_numpy(float), h.ftag.to_numpy(float)
+    if xg_weight > 0 and "xg_home" in h:
+        xh, xa = h.xg_home.to_numpy(float), h.xg_away.to_numpy(float)
+        has = ~(np.isnan(xh) | np.isnan(xa))
+        yh = np.where(has, xg_weight * np.nan_to_num(xh) + (1 - xg_weight) * yh, yh)
+        ya = np.where(has, xg_weight * np.nan_to_num(xa) + (1 - xg_weight) * ya, ya)
+    top = set(h[h.league.isin(lgs)].home)
+    others = (set(h.home) | set(h.away)) - top
+    p = config.settings()["model"]["outside_club_prior"]
+    g = dc.fit(h.home.tolist(), h.away.tolist(), yh, ya, weights=w, ridge=config.settings()["model"]["ridge"],
+               prior_attack={t: p["attack"] for t in others}, prior_defence={t: p["defence"] for t in others},
+               score_home=h.fthg.to_numpy(float), score_away=h.ftag.to_numpy(float), xi=xi)
+    oi = [g.index[t] for t in others if t in g.index]
+    unknown = (float(np.mean(g.attack[oi])), float(np.mean(g.defence[oi]))) if oi else (p["attack"], p["defence"])
+    return JointModel(goals=g, unknown=unknown)
+
+
 def referee_penalty_rates(df: pd.DataFrame) -> tuple[dict[str, tuple[int, float]], float | None]:
     """{referee: (games, penalties per game)} and the overall rate, from matches with penalty data."""
     if "pens_home" not in df:
@@ -188,6 +241,13 @@ class Predictor:
         self.team_league = last
         self.ref_rates, self.ref_league_rate = referee_penalty_rates(self.df[self.df.date < pd.Timestamp(self.as_of)])
         self._elo_maps = {}
+        self._joint = None
+
+    @property
+    def joint(self) -> JointModel | None:
+        if self._joint is None:
+            self._joint = fit_joint(self.df, self.as_of, self.xg_weight if self.factors["xg"] else 0.0) or False
+        return self._joint or None
 
     # ---------------- strength sources
 
@@ -240,10 +300,15 @@ class Predictor:
             sh, sa = self.models[lg_h].strength().get(home), self.models[lg_a].strength().get(away)
             if mh and ma and sh is not None and sa is not None:
                 dc_elo = (mh[0] + mh[1] * sh, ma[0] + ma[1] * sa)
+        joint_ga, unknown = None, []
+        if not dc_ga and c.get("type") in ("europe", "cup") and self.joint:
+            joint_ga = self.joint.expected_goals(home, away)
+            unknown = [t for t in (home, away) if not self.joint.knows(t)]
         rhos = [m.goals.rho for m in self.models.values()]
         rho = self.models[same].goals.rho if same else (float(np.mean(rhos)) if rhos else 0.0)
         return {"dc": dc_ga, "elo": elo_ga, "elo_ratings": (eh, ea), "dc_elo": dc_elo, "hfa_key": hfa_key,
                 "rho": rho, "rest": (self.rest_days(home, day), self.rest_days(away, day)),
+                "joint": joint_ga, "unknown_teams": unknown,
                 "same_league": same}
 
     def referee_delta(self, referee: str | None) -> float | None:
@@ -272,6 +337,7 @@ class Predictor:
             "source": g["source"], "factors": g["applied"],
             "elo": {"home": info["elo_ratings"][0], "away": info["elo_ratings"][1]},
             "rest_days": {"home": rest[0], "away": rest[1]},
+            "thin_data": info.get("unknown_teams") or [],
         })
         return payload
 
@@ -290,6 +356,12 @@ def combine(info: dict, *, factors: dict, blend_weight: float, rest_coef: float,
         source = "Dixon-Coles + Elo"
     elif dc_ga:
         lam, mu, source = dc_ga[0], dc_ga[1], "Dixon-Coles"
+    elif info.get("joint"):
+        lam, mu = info["joint"]
+        source = "Joint leagues + Europe"
+        if elo_ga and factors["elo"]:
+            lam, mu = elo_model.blend(lam, elo_ga[0], w), elo_model.blend(mu, elo_ga[1], w)
+            source += " + Elo"
     elif elo_ga:
         eh, ea = info["elo_ratings"]
         if info.get("dc_elo") and factors["elo"]:

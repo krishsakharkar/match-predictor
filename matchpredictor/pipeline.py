@@ -42,9 +42,15 @@ def sync_fixtures(conn, notes: list[str]) -> int:
             if not config.is_displayed(key, home, away):
                 continue
             ko = e["commence_time"]
-            db.upsert_match(conn, {"league": key, "season": config.season_code(ko), "date": ko[:10],
-                                   "kickoff_utc": ko, "home": home, "away": away, "odds_api_id": e["id"],
-                                   "source": "odds-api"})
+            mid = db.upsert_match(conn, {"league": key, "season": config.season_code(ko), "date": ko[:10],
+                                         "kickoff_utc": ko, "home": home, "away": away, "odds_api_id": e["id"],
+                                         "source": "odds-api"})
+            # one row per event: drop stale copies stored under an older name mapping or kickoff date
+            stale = [r[0] for r in conn.execute("SELECT id FROM matches WHERE odds_api_id=? AND id<>? AND status='SCHEDULED'",
+                                                (e["id"], mid))]
+            for sid in stale:
+                conn.execute("DELETE FROM predictions WHERE match_id=?", (sid,))
+                conn.execute("DELETE FROM matches WHERE id=?", (sid,))
             n += 1
     cur = config.season_code(now_utc())
     for key, c in config.leagues().items():

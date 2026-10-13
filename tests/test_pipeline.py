@@ -305,3 +305,17 @@ def test_backtest_pipeline_on_synthetic(conn):
     cfg, log = backtest.tune(rows, base, [])
     assert cfg["xg"] is False and log["xg"]["available"] is False           # no xG in synthetic data
     assert log["elo"]["available"] is False
+
+
+def test_sync_fixtures_dedupes_by_event(conn, monkeypatch):
+    from matchpredictor import pipeline
+    from matchpredictor.ingest import odds_api as oa
+    db.upsert_match(conn, {"league": "UCL", "season": "2627", "date": "2026-10-14", "home": "Porto-old",
+                           "away": "Betis", "kickoff_utc": "2026-10-14T19:00:00Z", "odds_api_id": "ev1",
+                           "status": "SCHEDULED", "source": "odds-api"})
+    monkeypatch.setattr(oa, "events", lambda conn, sport: [{"id": "ev1", "commence_time": "2026-10-14T19:00:00Z",
+                                                             "home_team": "Porto", "away_team": "Real Betis"}]
+                        if sport == "soccer_uefa_champs_league" else [])
+    pipeline.sync_fixtures(conn, [])
+    rows = conn.execute("SELECT home, away FROM matches WHERE odds_api_id='ev1'").fetchall()
+    assert [tuple(r) for r in rows] == [("FC Porto", "Betis")]

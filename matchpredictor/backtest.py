@@ -88,7 +88,7 @@ def collect_europe(df, book, comp: str, season: str, xg_weight: float, elo_param
                          factors={f: True for f in ALL_FACTORS})
         for g in chunk.itertuples():
             info = pred.components(comp, g.home, g.away, g.date.strftime("%Y-%m-%d"))
-            if info["elo"] is None:
+            if info["elo"] is None and info.get("joint") is None:
                 continue
             rows.append({**_meta(pd.Series(g._asdict())), "info": {k: v for k, v in info.items() if k != "dc"},
                          "dc": {xg_weight: None}, "rho": {xg_weight: info["rho"]}, "abs": {}})
@@ -344,7 +344,7 @@ def run(conn, season: str | None = None, notes: list[str] | None = None, refit_d
     }
     # Champions League
     ucl_seasons = sorted(set(df[(df.league == "UCL") & (df.status == "FT")].season))
-    if ucl_seasons and book:
+    if ucl_seasons:
         us = season if season in ucl_seasons else ucl_seasons[-1]
         ep = elo_params_before(us)
         urows = collect_europe(df, book, "UCL", us, selected["xg_weight"], ep, refit_days)
@@ -352,14 +352,17 @@ def run(conn, season: str | None = None, notes: list[str] | None = None, refit_d
             ucfg = dict(selected, elo_params=ep)
             rep["ucl"] = {
                 "season": us, "season_label": season_label(us),
+                "method": "Joint leagues + Europe model" + (" blended with Elo" if book else ""),
                 "selected": summary_metrics(score(evaluate(urows, ucfg))),
-                "elo_only": summary_metrics(score(evaluate(urows, dict(ucfg, use_dc_elo=False)))),
+                "elo_only": summary_metrics(score(evaluate([dict(r, info=dict(r["info"], joint=None)) for r in urows
+                                                            if r["info"]["elo"]], dict(ucfg, use_dc_elo=False))))
+                if book else None,
                 "matches": [{k: (round(v, 4) if isinstance(v, float) else v) for k, v in r.items()
                              if k not in ("close_h", "close_d", "close_a", "p_over25", "p_btts")}
                             for r in evaluate(urows, ucfg)],
             }
     else:
-        notes.append("Backtest: no Champions League history (needs API-Football + ClubElo) - UCL not evaluated")
+        notes.append("Backtest: no Champions League results in the data - UCL not evaluated")
     rep["notes"] = notes
     rep["summary"] = plain_summary(rep)
     rep["recommended_settings"] = {
@@ -394,7 +397,9 @@ def to_markdown(rep: dict) -> str:
         u = rep["ucl"]
         out += ["", f"## Champions League {u['season_label']}", "", "| Variant | n | Hit | Exact | Top-3 | Brier | Log loss |",
                 "|---|---|---|---|---|---|---|"]
-        for name, m in (("Elo + league ratings (selected)", u["selected"]), ("Elo only", u["elo_only"])):
+        for name, m in ((u["method"], u["selected"]), ("Elo only", u["elo_only"])):
+            if not m:
+                continue
             out.append(f"| {name} | {m['n']} | {m['accuracy_1x2']} | {m['exact_score_hit']} | {m['top3_score_hit']} | "
                        f"{m['brier_1x2']} | {m['log_loss_1x2']} |")
     out += ["", "## Tuning (" + rep["tune_season_label"] + ")", "", "```", str(rep["tuning"]), "```",

@@ -34,6 +34,8 @@ Actions with `actions/cache`).
 (Understat works from Python `requests` even though `curl` is refused). Anything needing them runs in
 GitHub Actions: `workflow_dispatch` the `predict` workflow on your branch with `mode: backtest` or
 `mode: netcheck` — branch runs never commit or deploy; read the job summary / artifact.
+As of 2026-10-13 api.clubelo.com also times out from GitHub Actions, and the API-Football account
+reports "suspended"; both paths degrade gracefully (joint model / no absences).
 
 ## Architecture
 
@@ -61,7 +63,8 @@ matchpredictor/
     markets.py        score matrix → 1X2, scorelines (top 3), totals, BTTS
   predict.py       Predictor.components() (raw sources) + combine() (blend + factors) → payload
   absences.py      injuries/suspensions/lineups → per-team effects (fresh-absence rule)
-  backtest.py      collect → tune (2024-25) → ablation on 2025-26 → bookmaker benchmark → UCL section
+  backtest.py      collect → tune (2024-25) → ablation on 2025-26 → bookmaker benchmark → UCL section;
+                   rolling_tune() daily re-optimisation, current_config() = settings + adopted tune
   pipeline.py      run(): history → fixtures → results → API-Football enrich → predict shown matches → site
   tracking.py      Brier, log loss, calibration, result / exact / top-3 hit rates on live predictions
   site.py          site/data/predictions.json (window) + accuracy.json (live tracking)
@@ -74,9 +77,12 @@ site/  index.html (matches by date) + accuracy.html (backtest + live tracking), 
 ### How a prediction is made (`predict.combine`)
 1. Same-league game (league match, or domestic cup between two clubs of one modelled league):
    Dixon-Coles on `xg_weight·xG + (1−xg_weight)·goals`, blended geometrically with the Elo model.
-2. Cross-league (Champions League, cups vs. foreign/lower clubs): each team's DC strength is mapped onto
-   the Elo scale (per-league least squares), blended with its ClubElo rating, then Elo→goals with that
-   competition's home advantage. No rating at all → no prediction (never a guess).
+2. Cross-league (Champions League, cups vs. foreign/lower clubs): the **joint model** (`fit_joint`) —
+   one DC fit over all leagues + European results (`data/history/ucl_results.csv` seed + live results);
+   European games link the leagues. Unseen clubs get the mean rating of Europe-only clubs and are
+   flagged `thin_data`. If ClubElo is available and `factors.elo` is on, Elo is blended in; without the
+   joint model, ClubElo alone (DC strength mapped onto the Elo scale) is the fallback. No rating at all
+   → no prediction (never a guess).
 3. Factors (each only if `settings.factors[...]` is on): rest-day difference, absences (attack ×,
    opponent ×), referee penalty-rate shift. Confirmed lineups (~1 h before kickoff) replace injury lists.
 
@@ -101,8 +107,11 @@ site/  index.html (matches by date) + accuracy.html (backtest + live tracking), 
 ## Conventions
 - Tunables live in `config/settings.json`; don't hard-code thresholds.
 - Tune on the season *before* the test season; a factor stays on only if it improves tuning-season
-  log loss by > 0.001 (`backtest.KEEP_THRESHOLD`). Copy `recommended_settings` from the backtest into
-  settings.json by hand (reviewable diff), never automatically.
+  log loss by > 0.001 (`backtest.KEEP_THRESHOLD`). settings.json holds the reviewed defaults; the daily
+  `rolling_tune` (last 365 days, walk-forward) may override them via `model_params.tuned` only when it
+  beats the configuration in use by > KEEP_THRESHOLD — every attempt is logged in `tuning_log`.
+- Seed history in `data/history/*.csv` is loaded on every refresh (source `seed`); add files there for
+  competitions with no live historical source.
 - Model math changes need tests (`tests/test_model_math.py`, `tests/test_phase_a.py`); pipeline/tracking
   changes → `tests/test_pipeline.py`.
 - Site is plain HTML/CSS/JS (no build step, no external libraries); dark theme, mobile-first.

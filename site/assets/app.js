@@ -54,7 +54,7 @@
         <div class="meta small">
           ${keyAbs.length ? `<div><span class="muted">Key absences:</span> ${keyAbs.map(a => `${esc(a.player)}${a.gk ? " (GK)" : ""}${a.status === "bench" ? " (bench)" : ""} <span class="muted">${esc(a.team)}</span>`).join(", ")}${p.lineups_confirmed ? ` <span class="badge">lineups confirmed</span>` : ""}</div>` : ""}
           <div><span class="muted">Referee:</span> ${m.referee ? esc(m.referee) : "not announced"}</div>
-          <div class="muted">xG ${num(p.xg.home, 2)}–${num(p.xg.away, 2)} · ${esc(p.source || "")}</div>
+          <div class="muted">xG ${num(p.xg.home, 2)}–${num(p.xg.away, 2)} · ${esc(p.source || "")}${(p.thin_data || []).length ? ` · thin data: ${esc(p.thin_data.join(", "))}` : ""}</div>
         </div>
         ${m.hit ? `<div class="hits">${badge(m.hit.result, "result")} ${badge(m.hit.exact, "exact score")} ${badge(m.hit.top3, "top 3")}</div>` : ""}`;
     }
@@ -148,7 +148,7 @@
       html += `<h2>By league</h2><div class="table-wrap"><table><tr><th class="l">League</th><th>n</th><th>Result</th><th>Exact</th><th>Top 3</th><th>Log loss</th><th>Bookmaker</th></tr>
         ${Object.entries(bl).filter(([, v]) => v.model && v.model.n).map(([k, v]) => `<tr><td class="l">${esc(k)}</td><td>${v.model.n}</td><td>${pct(v.model.accuracy_1x2, 1)}</td><td>${pct(v.model.exact_score_hit, 1)}</td><td>${pct(v.model.top3_score_hit, 1)}</td><td>${num(v.model.log_loss_1x2)}</td><td>${v.market && v.market.n ? num(v.market.log_loss_1x2) : "n/a"}</td></tr>`).join("")}
         </table></div>`;
-      if (bt.ucl) html += `<h2>Champions League · ${esc(bt.ucl.season_label)}</h2>${metricTiles(bt.ucl.selected)}<p class="muted small">Elo only: result ${pct(bt.ucl.elo_only.accuracy_1x2)}, log loss ${num(bt.ucl.elo_only.log_loss_1x2)}.</p>`;
+      if (bt.ucl) html += `<h2>Champions League · ${esc(bt.ucl.season_label)}</h2>${metricTiles(bt.ucl.selected)}<p class="muted small">${esc(bt.ucl.method || "")}, refitted weekly on earlier results only.${bt.ucl.elo_only ? ` Elo only: result ${pct(bt.ucl.elo_only.accuracy_1x2)}, log loss ${num(bt.ucl.elo_only.log_loss_1x2)}.` : ""}</p>`;
       html += `<h2>Calibration</h2>${calibrationTable(t.calibration_1x2)}`;
     } else html += `<div class="empty">No backtest yet.</div>`;
 
