@@ -21,9 +21,19 @@ def team_players(conn, league: str | None, season: str, team: str, allow_current
         rows = [dict(r) for r in conn.execute(
             "SELECT player, position, games, minutes, goals, npxg, xa FROM understat_players "
             "WHERE league=? AND season=? AND team=?", (league, s, team))]
-        if rows and (s != season or max(r["games"] or 0 for r in rows) >= 5):
+        if rows and (s != season or max(r["games"] or 0 for r in rows) >= 5) and covered(conn, league, s, team, rows):
             return rows
     return []
+
+
+def covered(conn, league: str, season: str, team: str, rows: list[dict], min_share: float = 0.7) -> bool:
+    """True if the players' minutes add up to most of the team's (11 x 90 per game): guards against
+    incomplete provider data."""
+    games = conn.execute("SELECT COUNT(*) FROM matches WHERE league=? AND season=? AND status='FT' AND (home=? OR away=?)",
+                         (league, season, team, team)).fetchone()[0]
+    if not games:
+        return True
+    return sum((r.get("minutes") or 0) for r in rows) >= min_share * 11 * 90 * games
 
 
 def absence_streak(conn, match_id: str, team: str, player: str, limit: int = 10) -> int:

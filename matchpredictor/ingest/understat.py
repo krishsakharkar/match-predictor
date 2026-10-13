@@ -110,7 +110,11 @@ def store(conn, league_key: str, season: str, payload: dict, known: set[str]) ->
         n_matches += 1
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     for p in payload["players"]:
-        team = config.canonical_team(p["team_title"].split(",")[-1].strip(), known)
+        if "," in p["team_title"]:
+            # multi-club titles are alphabetical, not chronological (and occasionally corrupt), so the
+            # current club can't be known: skip rather than credit the wrong team
+            continue
+        team = config.canonical_team(p["team_title"].strip(), known)
         conn.execute(
             "INSERT INTO understat_players (league, season, player_id, player, team, position, games, minutes, goals, "
             "xg, npxg, assists, xa, shots, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) "

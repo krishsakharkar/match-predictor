@@ -12,6 +12,11 @@ def outcome(hg, ag) -> str:
     return "home" if hg > ag else "away" if hg < ag else "draw"
 
 
+def _cards(r, side: str):
+    y, red = (r["hy"], r["hr"]) if side == "h" else (r["ay"], r["ar"])
+    return None if y is None else y + (red or 0)
+
+
 def card(r, pred: dict | None) -> dict:
     comps = config.competitions()
     c = comps.get(r["league"], {})
@@ -19,26 +24,31 @@ def card(r, pred: dict | None) -> dict:
          "date": r["date"], "kickoff_utc": r["kickoff_utc"], "home": r["home"], "away": r["away"],
          "status": r["status"], "referee": r["referee"],
          "result": {"home": r["fthg"], "away": r["ftag"]} if r["status"] == "FT" and r["fthg"] is not None else None,
-         "prediction": None}
+         "prediction": None,
+         "actual_stats": {"corners": [r["hc"], r["ac"]], "cards": [_cards(r, "h"), _cards(r, "a")],
+                          "shots": [r["hs"], r["as_"]], "sot": [r["hst"], r["ast"]]}
+         if r["status"] == "FT" and "hc" in r.keys() and r["hc"] is not None else None}
     if pred:
         x = pred["markets"]["1x2"]
         m["prediction"] = {
             "p_home": x["home"], "p_draw": x["draw"], "p_away": x["away"],
             "predicted_score": pred["predicted_score"],
             "top_scores": [{"score": t["score"], "prob": t["prob"]} for t in
-                           (pred.get("top_scores") or pred["markets"]["correct_score"])[:3]],
+                           (pred.get("top_scores") or pred["markets"]["correct_score"])[:6]],
             "xg": pred["xg"], "source": pred.get("source"), "factors": pred.get("factors", {}),
             "absences": pred.get("absences", []), "lineups_confirmed": pred.get("lineups_confirmed", False),
             "thin_data": pred.get("thin_data", []),
+            "stats": pred.get("stats") or {}, "players": pred.get("players") or {},
             "predicted_at": r["predicted_at"],
         }
         m["referee"] = m["referee"] or pred.get("referee")
         if m["result"]:
             act = f"{m['result']['home']}-{m['result']['away']}"
             fav = max(("home", "draw", "away"), key=lambda k: x[k])
+            scores = [t["score"] for t in m["prediction"]["top_scores"]]
             m["hit"] = {"result": fav == outcome(m["result"]["home"], m["result"]["away"]),
-                        "exact": pred["predicted_score"] == act,
-                        "top3": act in [t["score"] for t in m["prediction"]["top_scores"]]}
+                        "exact": pred["predicted_score"] == act, "top3": act in scores[:3],
+                        "top6": act in scores[:6] if len(scores) >= 6 else None}
     return m
 
 
@@ -46,6 +56,19 @@ def _rows(conn, lo: str, hi: str):
     return conn.execute(
         "SELECT m.*, p.payload, p.created_at AS predicted_at FROM matches m LEFT JOIN predictions p ON p.match_id = m.id "
         "WHERE m.date >= ? AND m.date <= ? ORDER BY COALESCE(m.kickoff_utc, m.date)", (lo, hi)).fetchall()
+
+
+def _bankers_meta() -> dict:
+    th = config.settings().get("bankers", {}).get("threshold", 0.7)
+    meta = {"threshold": th}
+    bt = config.SITE_DIR / "data" / "backtest.json"
+    try:
+        hist = json.loads(bt.read_text()).get("bankers", {}).get(str(th))
+        if hist and hist.get("n"):
+            meta["history"] = hist
+    except (OSError, ValueError):
+        pass
+    return meta
 
 
 def build(conn, notes: list[str] | None = None) -> dict:
@@ -63,7 +86,7 @@ def build(conn, notes: list[str] | None = None) -> dict:
     meta = {"generated_at": iso(now), "version": __version__, "model_version": MODEL_VERSION, "notes": notes or [],
             "factors": config.settings()["factors"], "odds_api_credits_remaining": last_remaining(conn, "odds_api"),
             "competitions": {k: {"name": v["name"], "badge": v["badge"]} for k, v in config.competitions().items()},
-            "tracked_teams": config.settings()["tracked_teams"]}
+            "tracked_teams": config.settings()["tracked_teams"], "bankers": _bankers_meta()}
     (data_dir / "predictions.json").write_text(
         json.dumps({**meta, "matches": matches}, separators=(",", ":"), default=str))
 

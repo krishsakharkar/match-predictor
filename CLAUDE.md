@@ -1,9 +1,16 @@
 # CLAUDE.md — match-predictor
 
 Football W/D/L + scoreline predictor. Python pipeline → SQLite → JSON → static GitHub Pages site.
-**Phase A** = result & scoreline accuracy only. Value bets, odds polling and corners/cards/shots/
-player props are *paused* (code kept: `betting.py`, `models/counts.py`, `models/props.py`, `value.py`).
-No LLM calls in the daily pipeline.
+Pages: Result & Score, Corners, Cards, Shots, Players (+ Model accuracy). Value bets and odds polling
+are *paused* (code kept: `betting.py`, `value.py`). No LLM calls in the daily pipeline.
+
+**One file per market and per page** (keep it that way):
+- models: `models/corners.py`, `models/cards.py`, `models/shots.py`, `models/players.py` on the shared
+  count engine in `models/counts.py`; `match_markets.py` assembles them into each prediction.
+- site: `assets/core.js` (shared helpers) + `assets/pages/<page>.js` (results, corners, cards, shots,
+  players, accuracy). Each page registers `MP.pages.<id>`; `assets/shell.js` merges the pages listed
+  in `<body data-pages="...">` into tabs (index.html) or runs a single page (corners.html etc.).
+  A new page = a new `pages/<id>.js` + add the id to index.html's data-pages and a standalone html.
 
 ## Scope (config, not code)
 - Every match of the competitions with `"coverage": "full"` in `config/competitions.json`
@@ -63,6 +70,8 @@ matchpredictor/
     markets.py        score matrix → 1X2, scorelines (top 3), totals, BTTS
   predict.py       Predictor.components() (raw sources) + combine() (blend + factors) → payload
   absences.py      injuries/suspensions/lineups → per-team effects (fresh-absence rule)
+  backtest_markets.py  walk-forward accuracy of corners/cards/shots/SOT main lines vs a baseline
+  match_markets.py corners/cards/shots/players blocks for a prediction payload
   backtest.py      collect → tune (2024-25) → ablation on 2025-26 → bookmaker benchmark → UCL section;
                    rolling_tune() daily re-optimisation, current_config() = settings + adopted tune
   pipeline.py      run(): history → fixtures → results → API-Football enrich → predict shown matches → site
@@ -70,7 +79,8 @@ matchpredictor/
   site.py          site/data/predictions.json (window) + accuracy.json (live tracking)
   schedule.py      stdlib-only cron gate (keep stdlib-only: runs before deps are installed)
   betting.py       PAUSED value-bet helpers (odds polling, de-vig evaluation, bet logging)
-site/  index.html (matches by date) + accuracy.html (backtest + live tracking), assets/app.js renders JSON
+site/  index.html (all pages as tabs), results/corners/cards/shots/players.html (standalone), accuracy.html;
+       assets/core.js + assets/pages/*.js + assets/shell.js render site/data/*.json
 .github/workflows/daily.yml   hourly tick → gate → run → (main only) commit DB + JSON → deploy Pages
 ```
 
@@ -115,3 +125,8 @@ site/  index.html (matches by date) + accuracy.html (backtest + live tracking), 
 - Model math changes need tests (`tests/test_model_math.py`, `tests/test_phase_a.py`); pipeline/tracking
   changes → `tests/test_pipeline.py`.
 - Site is plain HTML/CSS/JS (no build step, no external libraries); dark theme, mobile-first.
+
+### Data quirks
+- Understat multi-club player titles ("Club A,Club B") are alphabetical, not chronological, and were
+  corrupted for Ligue 1 2026-27 (31 PSG/Rennes players merged): such players are skipped, and a team
+  whose stored player minutes cover < 70% of its games (`absences.covered`) falls back to last season.

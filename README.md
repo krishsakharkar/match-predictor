@@ -7,16 +7,47 @@ Win/draw/loss probabilities and scoreline predictions for:
 - every match, in any competition, of **Barcelona, Real Madrid, Atlético Madrid, Bayern, PSG,
   Dortmund, Inter, Man United, Man City, Liverpool, Arsenal, Chelsea and Tottenham**.
 
-It runs as a static GitHub Pages site that updates itself through one GitHub Actions workflow, with
-no LLM calls in the daily pipeline. **Phase A** is about accuracy only. Value bets and the corners,
-cards, shots and player-prop models are paused; their code is kept for later phases.
+Live site: **https://krishsakharkar.github.io/match-predictor/**. It's a static GitHub Pages site that
+updates itself through one GitHub Actions workflow, with no LLM calls in the daily pipeline. Value
+bets are paused.
 
-- `index.html`: matches from the last 7 days and the next 7, grouped by date, each with a competition
-  badge. Every card shows W/D/L %, the most likely score plus the top 3, key absences, the referee,
-  and the result (or TBD) with hit/miss marks once played.
-- `accuracy.html`: the backtest summary, a table of what each factor adds, calibration, the
-  Champions League section, live tracking, and match-by-match tables.
-- `data/predictions.json`: machine-readable output for other tools.
+`index.html` merges every page as a tab. Each page also stands alone, and each has its own code file.
+
+| Page | File | Shows |
+|---|---|---|
+| Result & Score | `results.html`, `assets/pages/results.js` | W/D/L %; most likely score, top 3, and the 6 most likely; **Bankers** (favourite ≥ 70%); absences; referee; result with hit/miss marks |
+| Corners | `corners.html`, `assets/pages/corners.js` | expected corners per team; over/under lines for the total and each team |
+| Cards | `cards.html`, `assets/pages/cards.js` | expected cards (referee-adjusted); over/under lines |
+| Shots | `shots.html`, `assets/pages/shots.js` | expected shots and shots on target per team; over/under lines |
+| Players | `players.html`, `assets/pages/players.js` | per team: anytime goal, assist, 1+ shot on target, 2+ shots |
+| Model accuracy | `accuracy.html`, `assets/pages/accuracy.js` | backtests, factor table, bankers, markets, calibration, match-by-match tables |
+
+`data/predictions.json` is machine-readable output for other tools.
+
+Each market also has its own model file: `matchpredictor/models/corners.py`, `cards.py`, `shots.py`
+and `players.py`.
+
+**Markets backtest (2025-26, refitted every 14 days):**
+
+| Market | Main line | More likely side won | Brier, model vs baseline |
+|---|---|---|---|
+| Cards | 4.5 | 62% | 0.230 vs 0.238 |
+| Shots | 24.5 | 58% | 0.240 vs 0.250 |
+| Corners | 9.5 | 57% | 0.247 vs 0.250 |
+| Shots on target | 8.5 | 55% | 0.247 vs 0.250 |
+
+All four beat the baseline (last season's over rate), modestly. Player markets aren't backtested,
+because that needs per-match player data.
+
+**Bankers (2025-26):**
+
+| Favourite at least | Share of matches | Correct |
+|---|---|---|
+| 60% | 19% | 74% |
+| 70% | 6% | 80% |
+| 80% | 1% | 85% |
+
+The actual score fell inside the 6 most likely scorelines in 57% of matches.
 
 ## Backtest results (2025-26)
 

@@ -11,7 +11,7 @@ from datetime import timedelta
 
 import pandas as pd
 
-from . import MODEL_VERSION, config, db, history, tracking
+from . import MODEL_VERSION, config, db, history, match_markets, tracking
 from .absences import match_absences
 from .ingest import api_football, clubelo, football_data, odds_api
 from .ingest.http_cache import iso, now_utc, parse_iso
@@ -204,7 +204,7 @@ def run(conn, mode: str = "daily") -> dict:
     cfg = current_config(conn)                 # settings.json, overridden by the last adopted auto-tune
     pred = Predictor(df, now.date(), elo_book=book, elo_params=elo_params, fixture_teams=fixture_teams,
                      factors={f: cfg[f] for f in ALL_FACTORS}, xg_weight=cfg["xg_weight"] if cfg["xg"] else 0.0,
-                     blend_weight=cfg["blend_weight"], rest_coef=cfg["rest_coef"])
+                     blend_weight=cfg["blend_weight"], rest_coef=cfg["rest_coef"], with_stats=True)
 
     n_pred, skipped = 0, []
     for m in upcoming.itertuples():
@@ -216,6 +216,7 @@ def run(conn, mode: str = "daily") -> dict:
         if p is None:
             skipped.append(f"{m.home} v {m.away}")
             continue
+        match_markets.build(conn, pred, m.league, m.id, m.home, m.away, cur, p, ref)
         p["absences"] = shown or [dict(a, status="out") for a in raw_absences(conn, m.id)]
         p["referee"] = ref
         lu = {r["team"] for r in conn.execute("SELECT team FROM lineups WHERE match_id=?", (m.id,))}

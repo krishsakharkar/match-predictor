@@ -101,3 +101,21 @@ h3.day { font-size: 13px; color: var(--muted); margin: 16px 0 8px; font-weight: 
 .summary li { margin-bottom: 6px; }
 th.l, td.l { text-align: left; }
 footer a { color: var(--text); }
+.tabs { display: flex; gap: 4px; overflow-x: auto; margin: 0 0 12px; border-bottom: 1px solid var(--border); }
+.tab { background: none; border: 0; border-bottom: 2px solid transparent; color: var(--muted); padding: 9px 12px;
+  font: inherit; font-size: 14px; white-space: nowrap; cursor: pointer; }
+.tab.on { color: var(--text); border-bottom-color: var(--home); }
+.tab:focus-visible, .chip:focus-visible, .card:focus-visible { outline: 2px solid var(--home); outline-offset: 2px; }
+.bankers { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 2px 14px 10px;
+  margin-bottom: 8px; }
+.bankers h2 { margin-top: 12px; }
+.banker { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; padding: 6px 0; border-top: 1px solid var(--border); }
+.banker-p { margin-left: auto; font-weight: 700; font-variant-numeric: tabular-nums; }
+.statline { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-top: 8px; font-size: 14px; }
+.statline b { font-variant-numeric: tabular-nums; }
+.card[data-expand] { cursor: pointer; }
+.more { margin-top: 10px; display: grid; gap: 8px; }
+.tap { margin-top: 6px; text-align: right; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+.line { margin-top: 8px; }
+.banker .muted { flex: 1 1 100%; order: 3; }

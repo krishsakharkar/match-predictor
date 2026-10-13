@@ -87,6 +87,8 @@ def main(argv=None):
                 history.refresh(conn, config.season_code(date.today()), notes, backtest=True)
                 conn.commit()
             rep = backtest.run(conn, season=args.season, notes=notes)
+            from . import backtest_markets
+            rep["markets"] = backtest_markets.run(conn, season=args.season)
             with open(args.out, "w") as f:
                 json.dump(rep, f, separators=(",", ":"), default=str)
             md = backtest.to_markdown(rep)

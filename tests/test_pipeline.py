@@ -228,7 +228,7 @@ def test_fit_and_predict_offline(conn):
     assert sum(mk["1x2"].values()) == pytest.approx(1.0, abs=1e-3)
     assert mk["1x2"]["home"] > mk["1x2"]["away"]
     assert p["fair_odds"]["1x2"]["home"] == pytest.approx(1 / mk["1x2"]["home"], rel=1e-3)
-    assert len(p["top_scores"]) == 3 and p["top_scores"][0]["score"] == p["predicted_score"]
+    assert len(p["top_scores"]) == 6 and p["top_scores"][0]["score"] == p["predicted_score"]
     # promoted team with no history falls back to the prior, i.e. is predicted to be weak
     q = predict_match(model, teams[5], "NEWCO")
     assert q["markets"]["1x2"]["home"] > q["markets"]["1x2"]["away"]
