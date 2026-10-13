@@ -90,6 +90,7 @@ def sync_results(conn, notes: list[str], ttl_minutes: float | None = None) -> No
         except odds_api.OddsApiUnavailable as e:
             notes.append(f"Results unavailable for {c['name']}: {e}")
             continue
+        known = league_teams(conn)
         for g in res:
             if not g.get("completed") or not g.get("scores"):
                 continue
@@ -98,8 +99,17 @@ def sync_results(conn, notes: list[str], ttl_minutes: float | None = None) -> No
                 hg, ag = int(sc[g["home_team"]]), int(sc[g["away_team"]])
             except (KeyError, ValueError):
                 continue
-            conn.execute("UPDATE matches SET fthg=?, ftag=?, status='FT', updated_at=CURRENT_TIMESTAMP "
-                         "WHERE odds_api_id=?", (hg, ag, g["id"]))
+            cur = conn.execute("UPDATE matches SET fthg=?, ftag=?, status='FT', updated_at=CURRENT_TIMESTAMP "
+                               "WHERE odds_api_id=?", (hg, ag, g["id"]))
+            if cur.rowcount == 0:
+                # finished before we ever saw it as a fixture (e.g. before the first run): store it
+                home = config.canonical_team(g["home_team"], known)
+                away = config.canonical_team(g["away_team"], known)
+                if config.is_displayed(key, home, away):
+                    ko = g["commence_time"]
+                    db.upsert_match(conn, {"league": key, "season": config.season_code(ko), "date": ko[:10],
+                                           "kickoff_utc": ko, "home": home, "away": away, "status": "FT",
+                                           "fthg": hg, "ftag": ag, "odds_api_id": g["id"], "source": "odds-api"})
 
 
 # ---------------------------------------------------------------- API-Football (Pro for the current season)
@@ -206,9 +216,12 @@ def run(conn, mode: str = "daily") -> dict:
     cur = config.season_code(now)
     conn.execute("INSERT INTO runs (started_at, mode) VALUES (?, ?)", (iso(now), mode))
 
-    if mode == "results":          # quick post-match run: scores in, site out
+    if mode == "results":          # quick post-match run: scores in, backfill anything unpredicted, site out
         sync_results(conn, notes, ttl_minutes=50)
         conn.commit()
+        from .backtest import current_config
+        book = clubelo.EloBook(conn)
+        backfill_past(conn, notes, current_config(conn), now, book if book else None, db.get_param(conn, "elo_params"))
         from .site import build
         build(conn, notes)
         return {"mode": mode, "notes": notes}
