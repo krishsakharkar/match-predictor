@@ -146,3 +146,53 @@ def fit_count_model(stat, home, away, yh, ya, weights=None, ridge=1.0, referees=
     alpha = estimate_alpha(np.concatenate([yh, ya]), np.concatenate([mh, ma]), np.concatenate([w, w]))
     return CountModel(stat=stat, teams=teams, gen=g, conc=c, intercept=b, home_adv=h,
                       alpha=alpha, referee_factor=ref_factor)
+
+
+# ---------------------------------------------------------------- shared engine for the market modules
+
+def _ratings(m: CountModel, team: str) -> tuple[float, float] | None:
+    i = m.index.get(team)
+    return None if i is None else (float(m.gen[i]), float(m.conc[i]))
+
+
+def expectation(stat: str, models: dict, comp: str, home: str, away: str, team_league: dict,
+                referee: str | None = None) -> dict | None:
+    """Expected count of `stat` per team for any fixture.
+
+    models: league -> CountModel for this stat. Same-league fixtures use that league's model.
+    Cross-league fixtures (Champions League, cups) use each team's own league ratings with the
+    average intercept / home advantage of the leagues involved; clubs outside the modelled leagues
+    count as league-average and are listed in `thin`.
+    """
+    lg_h, lg_a = team_league.get(home), team_league.get(away)
+    same = comp if comp in models else (lg_h if lg_h and lg_h == lg_a and lg_h in models else None)
+    if same:
+        m = models[same]
+        rh, ra = _ratings(m, home) or (0.0, 0.0), _ratings(m, away) or (0.0, 0.0)
+        b, h, alpha = m.intercept, m.home_adv, m.alpha
+        f = m.referee_factor.get(referee, 1.0) if referee else 1.0
+        thin = [t for t, r in ((home, _ratings(m, home)), (away, _ratings(m, away))) if r is None]
+    else:
+        involved = [models[l] for l in {lg_h, lg_a} if l in models] or list(models.values())
+        if not involved:
+            return None
+        b = float(np.mean([m.intercept for m in involved]))
+        h = float(np.mean([m.home_adv for m in involved]))
+        alpha = float(np.mean([m.alpha for m in involved]))
+        rh = _ratings(models[lg_h], home) if lg_h in models else None
+        ra = _ratings(models[lg_a], away) if lg_a in models else None
+        thin = [t for t, r in ((home, rh), (away, ra)) if r is None]
+        rh, ra, f = rh or (0.0, 0.0), ra or (0.0, 0.0), 1.0
+    eh = float(np.exp(b + h + rh[0] + ra[1])) * f
+    ea = float(np.exp(b + ra[0] + rh[1])) * f
+    return {"home": eh, "away": ea, "alpha": alpha, "thin": thin, "referee_factor": f if f != 1.0 else None,
+            "source": "league model" if same else "cross-league estimate"}
+
+
+def market_block(exp: dict, total_lines, team_lines, max_k: int = 40) -> dict:
+    """Expected values plus over/under probabilities for totals and each team."""
+    ph, pa = count_pmf(exp["home"], exp["alpha"], max_k), count_pmf(exp["away"], exp["alpha"], max_k)
+    return {"home": exp["home"], "away": exp["away"], "total": exp["home"] + exp["away"],
+            "total_lines": line_probs(convolve(ph, pa), total_lines),
+            "home_lines": line_probs(ph, team_lines), "away_lines": line_probs(pa, team_lines),
+            "thin": exp["thin"], "source": exp["source"], "referee_factor": exp.get("referee_factor")}

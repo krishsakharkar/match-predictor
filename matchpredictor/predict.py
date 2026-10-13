@@ -212,6 +212,7 @@ class Predictor:
     rest_coef: float | None = None
     models: dict | None = None                      # league -> LeagueModel (pre-fitted, optional)
     fixture_teams: dict = field(default_factory=dict)
+    with_stats: bool = False                        # also fit corners/cards/shots models
 
     def __post_init__(self):
         s = config.settings()
@@ -228,7 +229,7 @@ class Predictor:
             self.models = {}
             for lg in config.leagues():
                 m = fit_league(self.df, lg, self.as_of, fixture_teams=self.fixture_teams.get(lg),
-                               xg_weight=self.xg_weight if self.factors["xg"] else 0.0)
+                               xg_weight=self.xg_weight if self.factors["xg"] else 0.0, with_stats=self.with_stats)
                 if m is not None:
                     self.models[lg] = m
         # each team's current domestic league = the league it most recently played in
@@ -401,7 +402,7 @@ def scoreline_payload(lam: float, mu: float, rho: float) -> dict:
     return _round_tree({
         "xg": {"home": lam, "away": mu},
         "predicted_score": markets.most_likely_score(m),
-        "top_scores": markets.correct_scores(m, 3),
+        "top_scores": markets.correct_scores(m, 6),
         "markets": mk,
         "fair_odds": {"1x2": {k: (1 / v if v > 0 else None) for k, v in mk["1x2"].items()}},
     })
