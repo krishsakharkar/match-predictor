@@ -260,6 +260,19 @@ def test_understat_store_skips_unmatched(conn):
     assert p["team"] == "Man City" and p["npxg"] == 19.0
 
 
+def test_understat_placeholder_xg_is_not_xg(conn):
+    m = {"id": "27930", "isResult": True, "datetime": "2025-02-09 16:30:00", "h": {"title": "Holstein Kiel"},
+         "a": {"title": "Bochum"}, "goals": {"h": "2", "a": "2"}, "xG": {"h": "2", "a": "2"}}
+    assert understat.match_xg(m) == (None, None)
+    assert understat.match_xg({**m, "xG": {"h": "2.0", "a": "1.86"}}) == (2.0, 1.86)
+    assert understat.match_xg({**m, "goals": {"h": "0", "a": "0"}, "xG": {"h": "0", "a": "0.4"}}) == (0.0, 0.4)
+    db.upsert_match(conn, {"league": "BUNDESLIGA", "season": "2425", "date": "2025-02-09", "home": "Holstein Kiel",
+                           "away": "Bochum", "status": "FT", "fthg": 2, "ftag": 2, "xg_home": 2.0, "xg_away": 2.0,
+                           "source": "understat"})          # stored before the placeholder was recognised
+    understat.store(conn, "BUNDESLIGA", "2425", {"dates": [m], "players": []}, {"Holstein Kiel", "Bochum"})
+    assert tuple(conn.execute("SELECT xg_home, xg_away FROM matches").fetchone()) == (None, None)
+
+
 def test_api_football_parsers():
     f = {"fixture": {"id": 7, "date": "2024-09-17T19:00:00+00:00", "referee": "S. Vincic, Slovenia",
                      "status": {"short": "FT"}},

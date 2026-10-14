@@ -89,6 +89,16 @@ def _f(x):
         return None
 
 
+def match_xg(m: dict) -> tuple[float | None, float | None]:
+    """League-page xG of one match. Whole numbers equal to the score on both sides are a placeholder for a
+    match Understat has no data for (id 27930: 2-2, 'xG' 2.0-2.0, empty rosters and shots), not xG."""
+    xh, xa = _f(m["xG"]["h"]), _f(m["xG"]["a"])
+    if xh is not None and xa is not None and (xh, xa) == (float(m["goals"]["h"]), float(m["goals"]["a"])) \
+            and xh.is_integer() and xa.is_integer():
+        return None, None
+    return xh, xa
+
+
 def store(conn, league_key: str, season: str, payload: dict, known: set[str]) -> dict:
     """Write match xG onto matches rows and player season stats. Returns counts + unmatched team names."""
     unmatched = set()
@@ -103,11 +113,14 @@ def store(conn, league_key: str, season: str, payload: dict, known: set[str]) ->
             unmatched.update(bad)      # never create rows under a name the results data doesn't use
             continue
         dt = m["datetime"][:10]
-        db.upsert_match(conn, {
+        xh, xa = match_xg(m)
+        mid = db.upsert_match(conn, {
             "league": league_key, "season": season, "date": dt, "home": home, "away": away, "status": "FT",
             "fthg": int(m["goals"]["h"]), "ftag": int(m["goals"]["a"]),
-            "xg_home": _f(m["xG"]["h"]), "xg_away": _f(m["xG"]["a"]), "understat_id": str(m["id"]),
-            "source": "understat"})
+            "xg_home": xh, "xg_away": xa, "understat_id": str(m["id"]), "source": "understat"})
+        if xh is None and _f(m["xG"]["h"]) is not None:
+            # upserts keep old values: clear a placeholder stored before it was recognised
+            conn.execute("UPDATE matches SET xg_home=NULL, xg_away=NULL WHERE id=?", (mid,))
         n_matches += 1
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     for p in payload["players"]:
