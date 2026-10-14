@@ -2,7 +2,7 @@
 (function () {
   "use strict";
   const { esc, pct } = MP;
-  const NO_DATA = "No player data for this club. Understat covers the five big leagues; other clubs need API-Football Pro.";
+  const NO_DATA = "No player data for this club. Understat covers the five big leagues; API-Football player data for the other clubs is being added.";
   function table(team, rows) {
     if (!rows || !rows.length) return `<div class="muted small">${esc(team)}: ${NO_DATA}</div>`;
     return `<div class="table-wrap"><table><tr><th class="l">${esc(team)}</th><th>Goal</th><th>Assist</th><th>1+ SOT</th><th>2+ shots</th><th>Mins</th></tr>
@@ -16,10 +16,10 @@
         .sort((a, b) => b[0].anytime_goal - a[0].anytime_goal);
       const summary = all.length
         ? `<div class="line small">Most likely scorer: <b>${esc(all[0][0].player)}</b> <span class="muted">${esc(all[0][1])}</span> ${pct(all[0][0].anytime_goal)}${all[1] ? ` · ${esc(all[1][0].player)} ${pct(all[1][0].anytime_goal)}` : ""}</div>`
-        : `<div class="muted small" style="margin-top:8px">${NO_DATA}</div>`;
+        : `<div class="muted small line">${NO_DATA}</div>`;
       const body = all.length ? table(m.home, pl.home) + table(m.away, pl.away) +
         `<div class="muted small">From each player's Understat npxG, xA and shot shares × this match's expected goals and shots. Expected minutes use season averages until lineups are confirmed.</div>` : "";
-      return MP.cardFrame(m, `<div class="label">players</div>`, summary, body);
+      return MP.cardFrame(m, all.length ? `<div class="pred">${pct(all[0][0].anytime_goal)}</div><div class="label">top scorer</div>` : "", summary, body);
     },
   };
 })();

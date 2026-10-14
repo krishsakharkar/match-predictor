@@ -31,6 +31,10 @@
     if (dayKey(d) === dayKey(y)) return "Yesterday";
     return d.toLocaleDateString("en-US", { timeZone: MP.TZ, weekday: "long", day: "numeric", month: "short" });
   };
+  MP.shortDay = d => {
+    const l = MP.dayLabel(d);
+    return ["Today", "Tomorrow", "Yesterday"].includes(l) ? l : d.toLocaleDateString("en-US", { timeZone: MP.TZ, weekday: "short", month: "short", day: "numeric" });
+  };
   MP.timeOf = m => (m.kickoff_utc ? new Date(m.kickoff_utc).toLocaleTimeString("en-US", { timeZone: MP.TZ, hour: "numeric", minute: "2-digit" }) + " ET" : "");
   MP.stamp = iso => new Date(iso).toLocaleString("en-US", { timeZone: MP.TZ, dateStyle: "medium", timeStyle: "short" }) + " ET";
   MP.grouped = (list, cardFn) => {
@@ -40,36 +44,58 @@
       if (!groups.length || groups[groups.length - 1].k !== k) groups.push({ k, label: MP.dayLabel(d), items: [] });
       groups[groups.length - 1].items.push(m);
     }
-    return groups.map(g => `<h3 class="day">${MP.esc(g.label)}</h3>${g.items.map(cardFn).join("")}`).join("");
+    return groups.map(g => `<h3 class="day">${MP.esc(g.label)} <span class="n">${g.items.length}</span></h3>${g.items.map(cardFn).join("")}`).join("");
   };
   MP.mark = (ok, label) => ok == null ? "" : `<span class="badge ${ok ? "hit" : "miss"}">${ok ? "✓" : "✗"} ${label}</span>`;
   MP.notes = d => (!d.notes || !d.notes.length) ? "" :
     `<details class="notes"><summary>Data notes (${d.notes.length})</summary><ul>${d.notes.map(n => `<li>${MP.esc(n)}</li>`).join("")}</ul></details>`;
+  MP.favourite = p => ["home", "draw", "away"].reduce((a, b) => (p[`p_${b}`] > p[`p_${a}`] ? b : a), "home");
 
-  /* The common card frame: header (badge, time), teams, a centre block, a summary line, and a body
-     that expands on tap. Each page supplies centre/summary/body. */
-  MP.cardFrame = (m, centre, summary, body) => {
-    let right = `<span class="muted">TBD</span>`;
-    if (m.result) right = `<b>FT ${m.result.home}–${m.result.away}</b>`;
-    else if (m.kickoff_utc && m.kickoff_utc < new Date().toISOString()) right = `<span class="muted">awaiting result</span>`;
-    return `<article class="card" tabindex="0" data-expand>
-      <div class="card-head"><span><span class="comp">${MP.esc(m.badge)}</span>${m.prediction && m.prediction.retro ? ` <span class="badge" title="Predicted after kickoff using only data from before the match. Not counted in live accuracy.">backfilled</span>` : ""}</span><span>${MP.esc(MP.timeOf(m) || m.date)}</span></div>
-      <div class="teams"><div class="team">${MP.esc(m.home)}</div>
-        <div class="score">${centre}<div class="result">${right}</div></div>
-        <div class="team away">${MP.esc(m.away)}</div></div>
+  /* Competition colours (badge -> CSS colour) and club crests (initials on a colour derived from the name). */
+  const COMP_COLOURS = { EPL: "#a66bff", UCL: "#4f8dff", LALIGA: "#ff6b4a", BUNDESLIGA: "#e8414f", SERIEA: "#2ec4b6",
+    LIGUE1: "#c7e04a", UEL: "#ff9f1c", UECL: "#3ddc84" };
+  MP.compColour = comp => COMP_COLOURS[comp] || "#7d8a9b";
+  MP.crest = name => {
+    const words = String(name || "?").replace(/[^\p{L}\p{N} ]/gu, " ").split(/\s+/).filter(w => w && !/^(fc|cf|sc|ac|as|fk|sk|afc|rc|cd|ud|sd|ssc)$/i.test(w));
+    const ini = (words.length > 1 ? words[0][0] + words[1][0] : (words[0] || "?").slice(0, 3)).toUpperCase();
+    let h = 0;
+    for (const ch of String(name)) h = (h * 31 + ch.codePointAt(0)) % 360;
+    return `<span class="crest" style="--h:${h}" aria-hidden="true">${MP.esc(ini)}</span>`;
+  };
+  MP.compTag = m => `<span class="comp" style="--c:${MP.compColour(m.comp)}" title="${MP.esc(m.comp_name || m.badge)}">${MP.esc(m.badge)}</span>`;
+
+  /* The common card frame: top line (competition, status, time), the two clubs stacked with the final score,
+     a highlighted centre block, a summary, and details that expand on tap. Pages supply centre/summary/body. */
+  MP.cardFrame = (m, centre, summary, body, opts = {}) => {
+    const r = m.result;
+    const started = m.kickoff_utc && m.kickoff_utc < new Date().toISOString();
+    const status = r ? `<span class="status ft">FT</span>` : started ? `<span class="status wait">Awaiting result</span>` : "";
+    const when = MP.esc(MP.timeOf(m) || m.date);      // the day is the group heading
+    const side = (name, goals, other) => {
+      const cls = r ? (goals > other ? "winner" : goals < other ? "loser" : "") : "";
+      return `<div class="side ${cls}">${MP.crest(name)}<span class="name">${MP.esc(name)}</span>${r ? `<span class="res">${goals}</span>` : "<span></span>"}</div>`;
+    };
+    const retro = m.prediction && m.prediction.retro
+      ? ` <span class="badge" title="Predicted after kickoff using only data from before the match. Not counted in live accuracy.">backfilled</span>` : "";
+    const verdict = opts.verdict == null ? "" : opts.verdict ? "hit" : "miss";
+    return `<article class="card ${verdict}" tabindex="0" ${body ? "data-expand" : ""}>
+      <div class="card-top">${MP.compTag(m)}${opts.badge || ""}${retro}${status}<span class="when">${when}</span></div>
+      <div class="matchup"><div class="sides">${side(m.home, r && r.home, r && r.away)}${side(m.away, r && r.away, r && r.home)}</div>
+        <div class="centre">${centre || ""}</div></div>
       ${summary}
-      ${body ? `<div class="more" hidden>${body}</div><div class="tap muted small">Tap for details</div>` : ""}
+      ${body ? `<button class="toggle" type="button" aria-expanded="false"><span class="tl">Details</span> <span class="chev">▾</span></button><div class="more" hidden>${body}</div>` : ""}
     </article>`;
   };
   MP.bindExpand = root => root.querySelectorAll("[data-expand]").forEach(c => {
+    const more = c.querySelector(".more"), btn = c.querySelector(".toggle");
+    if (!more) return;
     const toggle = () => {
-      const more = c.querySelector(".more"), tap = c.querySelector(".tap");
-      if (!more) return;
       more.hidden = !more.hidden;
-      if (tap) tap.textContent = more.hidden ? "Tap for details" : "Tap to close";
+      c.classList.toggle("open", !more.hidden);
+      if (btn) { btn.setAttribute("aria-expanded", String(!more.hidden)); btn.querySelector(".tl").textContent = more.hidden ? "Details" : "Hide details"; }
     };
-    c.addEventListener("click", e => { if (!e.target.closest("a,button")) toggle(); });
-    c.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); } });
+    c.addEventListener("click", e => { if (e.target.closest(".more a, .more table")) return; if (!e.target.closest("a")) toggle(); });
+    c.addEventListener("keydown", e => { if (e.target === c && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); toggle(); } });
   });
 
   /* Over/under table for a market block {total_lines, home_lines, away_lines}. */
