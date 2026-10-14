@@ -724,3 +724,35 @@ def test_audit_runs_on_a_built_warehouse(tmp_path):
     warehouse.build(tmp_path / "m.db", tmp_path / "d.db", tmp_path / "w.db")
     res, md = audit.run(tmp_path / "w.db", tmp_path / "d.db")
     assert res and "| Check |" in md and all(r["ok"] <= r["total"] or r["total"] == 0 for r in res)
+
+
+def test_warehouse_aligns_clubs_on_busy_matchdays(tmp_path):
+    """Seeds spell 'CFR Cluj', API-Football 'CFR 1907 Cluj'; every matchday has two 1-0 games, so only the
+    opponent (whose name is known) tells them apart. No duplicate match may come out of it."""
+    from matchpredictor import detail, warehouse
+    main = db.connect(tmp_path / "m.db")
+    games = [("2021-09-16", "FK Jablonec", "CFR Cluj", "Gent", "Flora"), ("2021-10-21", "CFR Cluj", "AZ Alkmaar", "Flora", "Gent"),
+             ("2021-11-25", "Randers FC", "CFR Cluj", "Partizan", "Flora"), ("2021-12-09", "CFR Cluj", "FK Jablonec", "Gent", "Partizan")]
+    for d_, h1, a1, h2, a2 in games:
+        for h, a in ((h1, a1), (h2, a2)):
+            db.upsert_match(main, {"league": "UECL", "season": "2122", "date": d_, "home": h, "away": a,
+                                   "status": "FT", "fthg": 1, "ftag": 0, "source": "seed"})
+    main.commit()
+    d = detail.connect(tmp_path / "d.db")
+    d.execute("INSERT INTO af_competitions VALUES (848, 2021, 'UEFA Europa Conference League', 'Cup', 'World',1,1,1,1,1,1)")
+    ids = {"CFR 1907 Cluj": 2246, "FK Jablonec": 1, "AZ Alkmaar": 2, "Randers FC": 3, "Gent": 4, "Flora Tallinn": 5,
+           "Partizan": 6}
+    api = {"CFR Cluj": "CFR 1907 Cluj", "Flora": "Flora Tallinn"}
+    d.executemany("INSERT INTO af_teams (team_id, name) VALUES (?,?)", [(v, k) for k, v in ids.items()])
+    n = 0
+    for d_, h1, a1, h2, a2 in games:
+        for h, a in ((h1, a1), (h2, a2)):
+            h, a, n = api.get(h, h), api.get(a, a), n + 1
+            d.execute("INSERT INTO af_fixtures (fixture_id, league_id, season, date, status, home_id, away_id, home, away,"
+                      " home_goals, away_goals) VALUES (?,848,2021,?,'FT',?,?,?,?,1,0)", (n, d_, ids[h], ids[a], h, a))
+    d.commit()
+    out = warehouse.build(tmp_path / "m.db", tmp_path / "d.db", tmp_path / "w.db")
+    w = sqlite3.connect(tmp_path / "w.db")
+    assert w.execute("SELECT COUNT(*), COUNT(af_fixture_id) FROM matches").fetchone() == (8, 8)
+    assert w.execute("SELECT af_team_id FROM teams WHERE team='CFR Cluj'").fetchone()[0] == 2246
+    assert any(c.startswith("possible duplicate") and c.endswith(": 0") for c in out["checks"])

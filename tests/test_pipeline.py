@@ -406,3 +406,16 @@ def test_load_seed_drops_rows_of_a_corrected_seed(conn, tmp_path, monkeypatch):
     (tmp_path / "ucl.csv").write_text(head + "UCL,2223,2022-09-07,,Ajax,Rangers,4,0,\n")    # name fixed
     history.load_seed(conn)
     assert [r[0] for r in conn.execute("SELECT away FROM matches WHERE league='UCL'")] == ["Rangers"]
+
+
+def test_european_seeds_have_no_domestic_namesakes():
+    """Fuzzy name matching once turned Rangers into 'Angers' and Apollon Limassol into Greece's 'Apollon';
+    none of these clubs played in Europe 2021-26."""
+    import csv
+    from matchpredictor import history
+    clubs = set()
+    for path in history.SEED_DIR.glob("*.csv"):
+        for r in csv.DictReader(open(path, encoding="utf-8")):
+            if r["competition"] in ("UCL", "UEL", "UECL"):
+                clubs.update((r["home"], r["away"]))
+    assert not clubs & {"Angers", "Apollon", "Paris FC"}
