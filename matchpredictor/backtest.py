@@ -25,6 +25,7 @@ from .predict import ALL_FACTORS, Predictor, combine, fit_league, load_matches
 
 log = logging.getLogger(__name__)
 KEEP_THRESHOLD = 0.001          # minimum log-loss improvement for a factor to stay in the model
+MIN_EUROPE_SEASON = 100        # finished UCL games for a season to be backtested / used for calibration
 FRESH_GRID = (0, 1, 3, 6)       # injuries: ignore absences older than k straight matches (0 = count all)
 
 
@@ -108,6 +109,7 @@ def evaluate(rows: list[dict], cfg: dict) -> list[dict]:
             info["dc_elo"] = None
         g = combine(info, factors=factors, blend_weight=cfg.get("blend_weight", 1.0),
                     rest_coef=cfg.get("rest_coef", 0.0), elo_params=cfg["elo_params"],
+                    cross_shrink=cfg.get("cross_shrink"),
                     absences=r["abs"].get(cfg.get("fresh_k", 0)) if factors["injuries"] else None)
         if g is None:
             continue
@@ -343,16 +345,29 @@ def run(conn, season: str | None = None, notes: list[str] | None = None, refit_d
                      if k not in ("close_h", "close_d", "close_a", "p_over25", "p_btts")} for r in sel_rows],
     }
     # Champions League
-    ucl_seasons = sorted(set(df[(df.league == "UCL") & (df.status == "FT")].season))
+    counts = df[(df.league == "UCL") & (df.status == "FT")].season.value_counts()
+    # evaluate a season with a real sample: a just-started live season (a handful of games) says nothing
+    ucl_seasons = sorted(s for s, n in counts.items() if n >= MIN_EUROPE_SEASON) or sorted(counts.index)
     if ucl_seasons:
         us = season if season in ucl_seasons else ucl_seasons[-1]
         ep = elo_params_before(us)
         urows = collect_europe(df, book, "UCL", us, selected["xg_weight"], ep, refit_days)
         if urows:
             ucfg = dict(selected, elo_params=ep)
+            prior = [x for x in ucl_seasons if x < us]
+            shrink = {}
+            if prior:     # calibrate cross-league confidence on the previous European season
+                prow = collect_europe(df, book, "UCL", prior[-1], selected["xg_weight"],
+                                      elo_params_before(prior[-1]), refit_days)
+                shrink = tune_shrink(prow, dict(selected, elo_params=elo_params_before(prior[-1])))
+            ucfg["cross_shrink"] = shrink
+            raw = summary_metrics(score(evaluate(urows, dict(ucfg, cross_shrink={}))))
             rep["ucl"] = {
                 "season": us, "season_label": season_label(us),
                 "method": "Joint leagues + Europe model" + (" blended with Elo" if book else ""),
+                "cross_league_shrink": shrink, "uncalibrated": raw,
+                "by_category": {c: summary_metrics(score(evaluate([r for r in urows if r["info"].get("category") == c], ucfg)))
+                                for c in ("top", "mixed", "outside")},
                 "selected": summary_metrics(score(evaluate(urows, ucfg))),
                 "elo_only": summary_metrics(score(evaluate([dict(r, info=dict(r["info"], joint=None)) for r in urows
                                                             if r["info"]["elo"]], dict(ucfg, use_dc_elo=False))))
@@ -371,6 +386,7 @@ def run(conn, season: str | None = None, notes: list[str] | None = None, refit_d
         "model.xg_weight": selected["xg_weight"], "elo.blend_weight_dc": selected.get("blend_weight", 1.0),
         "rest.coef": selected.get("rest_coef", 0.0), "elo.default_params": ep_test,
         "injuries.fresh_absence_matches": selected.get("fresh_k", 0),
+        "model.cross_league_shrink": (rep.get("ucl") or {}).get("cross_league_shrink"),
     }
     return rep
 
@@ -398,7 +414,8 @@ def to_markdown(rep: dict) -> str:
         u = rep["ucl"]
         out += ["", f"## Champions League {u['season_label']}", "", "| Variant | n | Hit | Exact | Top-3 | Brier | Log loss |",
                 "|---|---|---|---|---|---|---|"]
-        for name, m in ((u["method"], u["selected"]), ("Elo only", u["elo_only"])):
+        for name, m in ((u["method"] + " (calibrated)", u["selected"]), ("Uncalibrated", u.get("uncalibrated")),
+                        ("Elo only", u["elo_only"])):
             if not m:
                 continue
             out.append(f"| {name} | {m['n']} | {m['accuracy_1x2']} | {m['exact_score_hit']} | {m['top3_score_hit']} | "
@@ -469,6 +486,23 @@ def rolling_tune(conn, notes: list[str], days: int = 365, refit_days: int = 14, 
                      f"recent matches): {keep}")
     conn.commit()
     return entry
+
+
+SHRINK_GRID = (-0.4, -0.3, -0.2, -0.1, 0.0, 0.1, 0.2, 0.3, 0.4, 0.5)
+
+
+def tune_shrink(rows: list[dict], cfg: dict, min_n: int = 20) -> dict:
+    """Per matchup category (top-5 v top-5, top-5 v outside, outside v outside), the cross-league shrink
+    that minimises log loss. Categories with fewer than min_n games stay at 0 (no adjustment)."""
+    out = {}
+    for c in ("top", "mixed", "outside"):
+        sub = [r for r in rows if r["info"].get("category") == c]
+        if len(sub) < min_n:
+            out[c] = 0.0
+            continue
+        lls = {s: ll(evaluate(sub, dict(cfg, cross_shrink={c: s}))) for s in SHRINK_GRID}
+        out[c] = min(lls, key=lls.get)
+    return out
 
 
 def bankers(rows: list[dict], thresholds=(0.6, 0.65, 0.7, 0.75, 0.8)) -> dict:

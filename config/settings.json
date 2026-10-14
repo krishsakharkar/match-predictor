@@ -27,7 +27,13 @@
     "outside_club_prior": {
       "attack": -0.3,
       "defence": 0.3
-    }
+    },
+    "cross_league_shrink": {
+      "top": -0.4,
+      "mixed": 0.0,
+      "outside": 0.0
+    },
+    "joint_extra_leagues": false
   },
   "injuries": {
     "replacement_retention": 0.5,

@@ -373,3 +373,55 @@ def test_rolling_tune_needs_enough_matches(conn):
     notes = []
     out = backtest.rolling_tune(conn, notes, today="2026-10-13")
     assert out["adopted"] is False and "skipped" in notes[0]
+
+
+def test_shrink_moves_toward_or_away_from_even():
+    from matchpredictor.predict import shrink
+    lam, mu = 2.4, 0.8
+    l1, m1 = shrink(lam, mu, 0.3)          # toward even
+    assert l1 < lam and m1 > mu and l1 * m1 == pytest.approx(lam * mu)
+    l2, m2 = shrink(lam, mu, -0.3)         # wider gap
+    assert l2 > lam and m2 < mu
+    assert shrink(lam, mu, 0.0) == (lam, mu)
+
+
+def test_combine_applies_cross_league_shrink_by_category():
+    info = dict(INFO, dc=None, joint=(2.0, 1.0), category="top")
+    wide = combine(info, factors=NO, blend_weight=0.5, rest_coef=0, elo_params=PARAMS,
+                   cross_shrink={"top": -0.3})
+    plain = combine(info, factors=NO, blend_weight=0.5, rest_coef=0, elo_params=PARAMS, cross_shrink={})
+    assert plain["lam"] == 2.0 and wide["lam"] > 2.0
+    mixed = combine(dict(info, category="mixed"), factors=NO, blend_weight=0.5, rest_coef=0, elo_params=PARAMS,
+                    cross_shrink={"top": -0.3})
+    assert mixed["lam"] == 2.0
+
+
+def test_extra_leagues_never_displayed_and_parse():
+    from matchpredictor.ingest import football_data
+    assert "POR" in config.extra_leagues() and not config.is_displayed("POR", "Sp Lisbon", "Benfica")
+    text = ("Country,League,Season,Date,Time,Home,Away,HG,AG,Res\n"
+            "Norway,Eliteserien,2025,12/04/2025,17:00,Viking,Bodo/Glimt,2,1,H\n"
+            "Norway,Eliteserien,2019,12/04/2019,17:00,Viking,Molde,0,0,D\n")
+    rows = football_data.parse_new_csv(text, "NOR", since="2021-07-01")
+    assert len(rows) == 1 and rows[0]["fthg"] == 2 and rows[0]["season"] == "2425"
+    assert config.canonical_team("Bodo/Glimt") == "Bodø/Glimt" and config.canonical_team("Sp Lisbon") == "Sporting CP"
+
+
+def test_joint_model_extra_leagues_switch(monkeypatch):
+    from matchpredictor import predict
+    rng = np.random.default_rng(1)
+    rows, d0 = [], pd.Timestamp("2025-08-01")
+    for i in range(120):
+        lg, a, b = [("EPL", "Arsenal", "Chelsea"), ("EPL", "Chelsea", "Arsenal"), ("POR", "Benfica", "Sp Braga"),
+                    ("POR", "Sp Braga", "Benfica"), ("UCL", "Arsenal", "Benfica"), ("UCL", "Benfica", "Chelsea")][i % 6]
+        rows.append({"league": lg, "home": a, "away": b, "date": d0 + pd.Timedelta(days=i), "status": "FT",
+                     "fthg": float(rng.poisson(1.5)), "ftag": float(rng.poisson(1.1)), "xg_home": np.nan, "xg_away": np.nan})
+    df = pd.DataFrame(rows)
+    s = config.settings()
+    monkeypatch.setattr(config, "settings", lambda: s)       # settings() re-reads the file on every call
+    s["model"]["joint_extra_leagues"] = False
+    off = predict.fit_joint(df, pd.Timestamp("2026-01-01").date())
+    assert off is not None and not off.knows("Sp Braga")      # domestic-only extra-league club left out
+    s["model"]["joint_extra_leagues"] = True
+    on = predict.fit_joint(df, pd.Timestamp("2026-01-01").date())
+    assert on.knows("Sp Braga")

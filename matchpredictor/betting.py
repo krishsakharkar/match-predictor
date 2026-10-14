@@ -15,6 +15,8 @@ def sync_odds(conn, notes: list[str], horizon: timedelta) -> int:
     now = now_utc()
     stored = 0
     for key, lg in config.competitions().items():
+        if not lg.get("odds_api_sport"):
+            continue
         upcoming = conn.execute(
             "SELECT id, odds_api_id FROM matches WHERE league=? AND status='SCHEDULED' AND kickoff_utc > ? "
             "AND kickoff_utc < ? AND odds_api_id IS NOT NULL", (key, iso(now), iso(now + horizon))).fetchall()

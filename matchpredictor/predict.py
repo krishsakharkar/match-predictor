@@ -164,6 +164,8 @@ def fit_joint(df: pd.DataFrame, as_of: date, xg_weight: float = 0.0, xi: float =
     comps = config.competitions()
     europe = [k for k, v in comps.items() if v["type"] == "europe"]
     lgs = list(config.leagues())
+    if config.settings()["model"].get("joint_extra_leagues"):   # stored either way; off: hurt 2024-25 UCL log loss
+        lgs += list(config.extra_leagues())
     as_of_ts = pd.Timestamp(as_of)
     h = df[(df.status == "FT") & df.fthg.notna() & df.league.isin(lgs + europe) & (df.date < as_of_ts)
            & (df.date >= as_of_ts - pd.Timedelta(days=365 * years))]
@@ -176,7 +178,7 @@ def fit_joint(df: pd.DataFrame, as_of: date, xg_weight: float = 0.0, xi: float =
         has = ~(np.isnan(xh) | np.isnan(xa))
         yh = np.where(has, xg_weight * np.nan_to_num(xh) + (1 - xg_weight) * yh, yh)
         ya = np.where(has, xg_weight * np.nan_to_num(xa) + (1 - xg_weight) * ya, ya)
-    top = set(h[h.league.isin(lgs)].home)
+    top = set(h[h.league.isin(lgs)].home)          # clubs with domestic league data
     others = (set(h.home) | set(h.away)) - top
     p = config.settings()["model"]["outside_club_prior"]
     g = dc.fit(h.home.tolist(), h.away.tolist(), yh, ya, weights=w, ridge=config.settings()["model"]["ridge"],
@@ -305,11 +307,13 @@ class Predictor:
         if not dc_ga and c.get("type") in ("europe", "cup") and self.joint:
             joint_ga = self.joint.expected_goals(home, away)
             unknown = [t for t in (home, away) if not self.joint.knows(t)]
+        big = (lg_h in self.models, lg_a in self.models)
+        category = "top" if all(big) else "mixed" if any(big) else "outside"
         rhos = [m.goals.rho for m in self.models.values()]
         rho = self.models[same].goals.rho if same else (float(np.mean(rhos)) if rhos else 0.0)
         return {"dc": dc_ga, "elo": elo_ga, "elo_ratings": (eh, ea), "dc_elo": dc_elo, "hfa_key": hfa_key,
                 "rho": rho, "rest": (self.rest_days(home, day), self.rest_days(away, day)),
-                "joint": joint_ga, "unknown_teams": unknown,
+                "joint": joint_ga, "unknown_teams": unknown, "category": category,
                 "same_league": same}
 
     def referee_delta(self, referee: str | None) -> float | None:
@@ -343,8 +347,18 @@ class Predictor:
         return payload
 
 
+def shrink(lam: float, mu: float, s: float) -> tuple[float, float]:
+    """Pull (s > 0) or push (s < 0) the two teams' expected goals toward/away from their geometric
+    mean: a calibration knob for cross-league games, tuned per matchup category on past seasons."""
+    if not s:
+        return lam, mu
+    g = float(np.sqrt(lam * mu))
+    return float(g ** s * lam ** (1 - s)), float(g ** s * mu ** (1 - s))
+
+
 def combine(info: dict, *, factors: dict, blend_weight: float, rest_coef: float, elo_params: dict,
-            absences: dict | None = None, referee_delta: float | None = None) -> dict | None:
+            absences: dict | None = None, referee_delta: float | None = None,
+            cross_shrink: dict | None = None) -> dict | None:
     """Blend strength sources and apply context factors (shared by the live pipeline and the backtest).
 
     info: Predictor.components() output. Returns {"lam", "mu", "rho", "source", "applied"} or None when
@@ -363,6 +377,8 @@ def combine(info: dict, *, factors: dict, blend_weight: float, rest_coef: float,
         if elo_ga and factors["elo"]:
             lam, mu = elo_model.blend(lam, elo_ga[0], w), elo_model.blend(mu, elo_ga[1], w)
             source += " + Elo"
+        cs = config.settings()["model"].get("cross_league_shrink", {}) if cross_shrink is None else cross_shrink
+        lam, mu = shrink(lam, mu, cs.get(info.get("category"), 0.0))
     elif elo_ga:
         eh, ea = info["elo_ratings"]
         if info.get("dc_elo") and factors["elo"]:

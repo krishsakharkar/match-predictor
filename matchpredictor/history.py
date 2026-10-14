@@ -204,6 +204,7 @@ def load_seed(conn) -> int:
 
 def refresh(conn, current: str, notes: list[str], backtest: bool = False) -> dict:
     out = {"seed": load_seed(conn), "football_data": football_data.update_history(conn, current, notes)}
+    out["extra_leagues"] = football_data.update_extra(conn, current, notes)
     conn.commit()
     out["understat"] = understat.update(conn, current, notes)
     conn.commit()

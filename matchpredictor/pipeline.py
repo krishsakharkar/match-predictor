@@ -31,6 +31,8 @@ def sync_fixtures(conn, notes: list[str]) -> int:
     known = league_teams(conn)
     n = 0
     for key, c in config.competitions().items():
+        if not c.get("odds_api_sport"):
+            continue
         try:
             evs = odds_api.events(conn, c["odds_api_sport"])
         except odds_api.OddsApiUnavailable as e:
@@ -79,6 +81,8 @@ def sync_results(conn, notes: list[str], ttl_minutes: float | None = None) -> No
     """Results for shown matches via Odds API /scores (2 credits/competition, cached ~20h, only when needed)."""
     now = now_utc()
     for key, c in config.competitions().items():
+        if not c.get("odds_api_sport"):
+            continue
         pending = sum(1 for r in conn.execute(
             "SELECT home, away FROM matches WHERE league=? AND status='SCHEDULED' AND odds_api_id IS NOT NULL "
             "AND kickoff_utc < ? AND kickoff_utc > ?", (key, iso(now - timedelta(hours=2)), iso(now - timedelta(days=3))))

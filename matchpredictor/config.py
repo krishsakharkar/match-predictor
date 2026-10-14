@@ -34,6 +34,12 @@ def leagues() -> dict:
     return {k: v for k, v in competitions().items() if v["type"] == "league" and v.get("football_data_code")}
 
 
+def extra_leagues() -> dict:
+    """Results-only leagues (Portugal, Netherlands, ...) that feed the joint cross-league model so clubs
+    from outside the five big leagues are rated from their domestic games. Never displayed."""
+    return {k: v for k, v in competitions().items() if v["type"] == "extra"}
+
+
 def tracked_teams() -> set[str]:
     return set(settings()["tracked_teams"])
 
@@ -45,6 +51,8 @@ def is_displayed(comp: str, home: str, away: str) -> bool:
         return False
     if c["coverage"] == "full":
         return True
+    if c["coverage"] == "none":
+        return False
     t = tracked_teams()
     return home in t or away in t
 
