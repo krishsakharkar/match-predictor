@@ -6,3 +6,5 @@ data/raw/
 *.db-journal
 data/cache/
 data/detail.db
+data/warehouse.db
+data/warehouse.building

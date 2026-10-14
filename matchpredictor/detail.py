@@ -56,7 +56,7 @@ CREATE TABLE IF NOT EXISTS af_team_competitions (team_id INTEGER, season INTEGER
 CREATE TABLE IF NOT EXISTS af_fixtures (fixture_id INTEGER PRIMARY KEY, league_id INTEGER, season INTEGER, round TEXT,
     date TEXT, kickoff_utc TEXT, referee TEXT, venue TEXT, status TEXT, home_id INTEGER, away_id INTEGER, home TEXT,
     away TEXT, home_goals INTEGER, away_goals INTEGER, ht_home INTEGER, ht_away INTEGER, et_home INTEGER,
-    et_away INTEGER, pen_home INTEGER, pen_away INTEGER, detail_at TEXT);
+    et_away INTEGER, pen_home INTEGER, pen_away INTEGER, detail_at TEXT, ft_home INTEGER, ft_away INTEGER);
 CREATE INDEX IF NOT EXISTS ix_aff_league ON af_fixtures (league_id, season);
 CREATE TABLE IF NOT EXISTS af_team_stats (fixture_id INTEGER, season INTEGER, team_id INTEGER, stat TEXT, value TEXT,
     PRIMARY KEY (fixture_id, team_id, stat));
@@ -96,10 +96,19 @@ AF_ARCHIVE_DIR = config.DATA_DIR / "history" / "api_football"
 def connect(path: Path | str | None = None) -> sqlite3.Connection:
     path = Path(path or DETAIL_DB)
     path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(path))
+    conn = sqlite3.connect(str(path), timeout=60)
     conn.row_factory = sqlite3.Row
+    if str(path) != ":memory:":
+        conn.execute("PRAGMA journal_mode=WAL")    # the warehouse build can read while a download writes
     conn.executescript(SCHEMA)
+    for table, col, typ in MIGRATIONS:
+        if col not in {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {typ}")
     return conn
+
+
+# columns added after the first archives were written (load_af tolerates archives without them)
+MIGRATIONS = [("af_fixtures", "ft_home", "INTEGER"), ("af_fixtures", "ft_away", "INTEGER")]
 
 
 def _insert(dconn, meta: dict, players: list[dict], shots: list[dict]) -> None:

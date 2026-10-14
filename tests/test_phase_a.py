@@ -592,3 +592,65 @@ def test_api_football_history_backfill_resume_and_archive(tmp_path):
     fake.calls.clear()
     afh.Backfill(None, d2, [], client=fake).run(teams, current=2026, first=2025)
     assert not any(p.get("season") == 2025 for _, p in fake.calls)       # archived season not re-fetched
+
+
+def test_warehouse_merges_sources(tmp_path):
+    from matchpredictor import detail, warehouse
+    main = db.connect(tmp_path / "m.db")
+    for row in ({"league": "SERIEA", "season": "2526", "date": "2025-09-20", "home": "Inter", "away": "Napoli",
+                 "status": "FT", "fthg": 2, "ftag": 1, "hs": 15, "as_": 9, "hc": 6, "ac": 3, "xg_home": 1.9,
+                 "xg_away": 0.8, "source": "football-data"},
+                {"league": "EPL", "season": "2526", "date": "2025-09-21", "home": "Arsenal", "away": "Chelsea",
+                 "status": "FT", "fthg": 1, "ftag": 1, "understat_id": "5", "source": "football-data"}):
+        db.upsert_match(main, row)
+    main.commit()
+    d = detail.connect(tmp_path / "d.db")
+    d.executemany("INSERT INTO af_competitions VALUES (?,?,?,?,?,1,1,1,1,1,1)",
+                  [(135, 2025, "Serie A", "League", "Italy"), (39, 2025, "Premier League", "League", "England"),
+                   (137, 2025, "Coppa Italia", "Cup", "Italy"), (500, 2025, "Veikkausliiga", "League", "Finland")])
+    d.executemany("INSERT INTO af_teams (team_id, name, our_name, country) VALUES (?,?,?,?)",
+                  [(505, "Inter", "Inter", "Italy"), (492, "Napoli", None, "Italy"), (42, "Arsenal", "Arsenal", "England"),
+                   (49, "Chelsea", None, "England"), (900, "Inter Turku", None, "Finland"), (901, "Lecce", None, "Italy")])
+    fx = "INSERT INTO af_fixtures (fixture_id, league_id, season, date, status, home_id, away_id, home, away, " \
+         "home_goals, away_goals, et_home, et_away, pen_home, pen_away) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
+    d.executemany(fx, [(1, 135, 2025, "2025-09-20", "FT", 505, 492, "Inter", "Napoli", 2, 1, None, None, None, None),
+                       (2, 137, 2025, "2026-01-14", "AET", 505, 901, "Inter", "Lecce", 3, 2, 1, 0, None, None),
+                       (3, 500, 2025, "2025-09-20", "FT", 900, 901, "Inter Turku", "Lecce", 0, 0, None, None, None, None),
+                       (4, 39, 2025, "2025-09-21", "FT", 42, 49, "Arsenal", "Chelsea", 1, 1, None, None, None, None)])
+    d.executemany("INSERT INTO af_team_stats VALUES (?,?,?,?,?)",
+                  [(1, 2025, 505, "Total Shots", "99"), (1, 2025, 505, "Ball Possession", "61%"),
+                   (2, 2025, 505, "Corner Kicks", "8"), (2, 2025, 505, "expected_goals", "2.40")])
+    d.execute("INSERT INTO af_player_match (fixture_id, season, team_id, player_id, player, minutes, substitute, rating, "
+              "goals) VALUES (4, 2025, 42, 7, 'B. Saka', 90, 0, 7.9, 1)")
+    d.execute("INSERT INTO af_player_match (fixture_id, season, team_id, player_id, player, minutes, substitute) "
+              "VALUES (4, 2025, 42, 30, 'Unused Sub', NULL, 1)")
+    d.execute("INSERT INTO detail_matches VALUES ('EPL:2526:Arsenal:Chelsea','EPL','2526','2025-09-21','Arsenal',"
+              "'Chelsea','understat','5','x')")
+    d.execute("INSERT INTO player_matches (match_id, team, side, player_id, player, started, minutes, goals, xg, xa) "
+              "VALUES ('EPL:2526:Arsenal:Chelsea', 'Arsenal', 'h', 1111, 'Bukayo Saka', 1, 90, 1, 0.62, 0.1)")
+    d.commit()
+    out = warehouse.build(tmp_path / "m.db", tmp_path / "d.db", tmp_path / "w.db")
+    w = sqlite3.connect(tmp_path / "w.db")
+    # API fixture merged onto our league match: football-data stats kept, possession added from the API
+    assert w.execute("SELECT af_fixture_id FROM matches WHERE match_id='SERIEA:2526:Inter:Napoli'").fetchone()[0] == 1
+    st = w.execute("SELECT shots, corners, possession, xg, stats_source FROM team_match_stats WHERE "
+                   "match_id='SERIEA:2526:Inter:Napoli' AND team='Inter'").fetchone()
+    assert tuple(st) == (15, 6, 61, 1.9, "football-data")
+    # API-only cup match: added under a dated id, 90-minute score (extra-time goal removed), API xG
+    cup = w.execute("SELECT home_goals, away_goals, home_xg, xg_source FROM matches WHERE match_id='COPPAITALIA:2026-01-14:Inter:Lecce'").fetchone()
+    assert tuple(cup) == (2, 2, 2.4, "api-football")
+    # a Finnish 'Inter' is not Inter
+    assert w.execute("SELECT home FROM matches WHERE af_fixture_id=3").fetchone()[0] == "Inter Turku"
+    # one player across both sources, full name kept, xG from Understat, rating from the API
+    p = w.execute("SELECT player_id, name, understat_player_id FROM players WHERE af_player_id=7").fetchone()
+    assert tuple(p) == ("af:7", "Bukayo Saka", 1111)
+    pm = w.execute("SELECT player_id, rating, xg, goals, sources FROM player_match_stats WHERE team='Arsenal'").fetchall()
+    assert [tuple(r) for r in pm] == [("af:7", 7.9, 0.62, 1, "api-football,understat")]   # unused sub dropped
+    assert out["checks"][0].endswith(": 0") and out["checks"][1].endswith(": 0")
+
+
+def test_player_name_matching():
+    from matchpredictor.warehouse import same_player
+    assert same_player("B. Saka", "Bukayo Saka") and same_player("Rodri", "Rodrigo Hernández Rodri")
+    assert same_player("Vinícius Júnior", "Vinicius Junior")
+    assert not same_player("B. Saka", "J. Saka") and not same_player("Gabriel Jesus", "Gabriel Martinelli")

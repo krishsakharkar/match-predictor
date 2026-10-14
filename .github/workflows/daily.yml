@@ -84,6 +84,7 @@ jobs:
             python -m matchpredictor detail --apifootball-sample > out.json
           else
             python -m matchpredictor detail --load --apifootball --export > out.json
+            python -m matchpredictor warehouse >> out.json      # clean unified tables + cross-source checks
           fi
           cat out.json
           { echo '```'; cat out.json; echo '```'; du -sh data/history/api_football 2>/dev/null || true; } >> "$GITHUB_STEP_SUMMARY"
