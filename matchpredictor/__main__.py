@@ -65,6 +65,7 @@ def main(argv=None):
     d.add_argument("--seasons", type=int, default=None, help="past seasons to cover (default: history_seasons)")
     d.add_argument("--pause", type=float, default=1.0, help="seconds between Understat downloads")
     d.add_argument("--limit", type=int, default=None, help="at most this many matches per run")
+    sub.add_parser("warehouse", help="rebuild data/warehouse.db (clean unified data) from match.db + detail.db")
     sub.add_parser("site", help="rebuild site JSON from the database")
     sub.add_parser("gate", help="print the mode to run now: daily | prekickoff | skip")
     sub.add_parser("netcheck", help="check which data hosts are reachable from here")
@@ -78,6 +79,11 @@ def main(argv=None):
     if args.cmd == "netcheck":
         for k, v in netcheck().items():
             print(f"{k:32s} {v}")
+        return 0
+
+    if args.cmd == "warehouse":
+        from . import warehouse
+        print(json.dumps(warehouse.build(), indent=1))
         return 0
 
     with db.session() as conn:

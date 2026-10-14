@@ -60,14 +60,25 @@ class Backfill:
 
     # ---------------------------------------------------------------- plumbing
     def _call(self, path: str, params: dict) -> dict:
-        for attempt in (1, 2):
+        """One request with retries: a dropped connection (seen after ~800 requests on 2026-10-14) waits and
+        retries up to 4 times; the per-minute limit waits one window. Plan / quota errors stop the run."""
+        net_tries = 0
+        rate_tried = False
+        while True:
             try:
                 body = self.client.fetch(path, params)
                 self.requests += 1
                 return body
             except ApiFootballUnavailable as e:
-                if attempt == 1 and "ratelimit" in str(e).lower().replace(" ", ""):
-                    time.sleep(61)      # per-minute limit: wait one window, retry once
+                msg = str(e)
+                if msg.startswith("network error") and net_tries < 4:
+                    net_tries += 1
+                    self.client.disabled_reason = None      # the client stops itself on network errors
+                    time.sleep(5 * net_tries)
+                    continue
+                if not rate_tried and "ratelimit" in msg.lower().replace(" ", ""):
+                    rate_tried = True
+                    time.sleep(61)
                     continue
                 raise
 
@@ -158,10 +169,12 @@ class Backfill:
         fx, lg, tm, g, sc = f["fixture"], f["league"], f["teams"], f.get("goals") or {}, f.get("score") or {}
         st = fx.get("status") or {}
         ht, et, pen = sc.get("halftime") or {}, sc.get("extratime") or {}, sc.get("penalty") or {}
+        ft = sc.get("fulltime") or {}       # 90 minutes; goals.* include extra time
         self.d.execute(
             "INSERT INTO af_fixtures (fixture_id, league_id, season, round, date, kickoff_utc, referee, venue, status, "
             "home_id, away_id, home, away, home_goals, away_goals, ht_home, ht_away, et_home, et_away, pen_home, "
-            "pen_away) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(fixture_id) DO UPDATE SET "
+            "pen_away, ft_home, ft_away) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
+            "ON CONFLICT(fixture_id) DO UPDATE SET ft_home=excluded.ft_home, ft_away=excluded.ft_away, "
             "round=excluded.round, date=excluded.date, kickoff_utc=excluded.kickoff_utc, referee=excluded.referee, "
             "venue=excluded.venue, status=excluded.status, home_goals=excluded.home_goals, "
             "away_goals=excluded.away_goals, ht_home=excluded.ht_home, ht_away=excluded.ht_away, "
@@ -169,7 +182,7 @@ class Backfill:
             (fx["id"], lg["id"], season, lg.get("round"), (fx.get("date") or "")[:10], fx.get("date"), fx.get("referee"),
              (fx.get("venue") or {}).get("name"), st.get("short"), tm["home"]["id"], tm["away"]["id"],
              tm["home"]["name"], tm["away"]["name"], g.get("home"), g.get("away"), ht.get("home"), ht.get("away"),
-             et.get("home"), et.get("away"), pen.get("home"), pen.get("away")))
+             et.get("home"), et.get("away"), pen.get("home"), pen.get("away"), ft.get("home"), ft.get("away")))
         for side in ("home", "away"):
             self.d.execute("INSERT OR IGNORE INTO af_teams (team_id, name) VALUES (?, ?)",
                            (tm[side]["id"], tm[side]["name"]))

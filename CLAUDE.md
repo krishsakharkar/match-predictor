@@ -30,6 +30,7 @@ python -m matchpredictor run --mode daily    # or prekickoff | auto (auto = ask 
 python -m matchpredictor history [--backtest-data]   # football-data, Understat, ClubElo (+API-Football history)
 python -m matchpredictor backtest --refresh  # walk-forward ablation → site/data/backtest.json (+ markdown)
 python -m matchpredictor detail --load --download --export   # Understat players/shots -> detail.db + archives
+python -m matchpredictor warehouse           # rebuild data/warehouse.db (docs/DATA_MODEL.md)
 python -m matchpredictor site                # rebuild site JSON from DB
 python -m http.server -d site 8000           # preview
 ```
@@ -78,6 +79,8 @@ matchpredictor/
   detail.py        data/detail.db (gitignored, kept in the Actions cache): Understat player_matches + shots and
                    API-Football af_* tables; finished seasons archived as deterministic csv.gz in
                    data/history/understat/ and data/history/api_football/ (`detail --load` rebuilds in seconds)
+  warehouse.py     data/warehouse.db: clean unified copy of everything (our names + match ids, one player id per
+                   person, best source per column, cross-source checks) - see docs/DATA_MODEL.md
   backtest_markets.py  walk-forward accuracy of corners/cards/shots/SOT main lines vs a baseline
   match_markets.py corners/cards/shots/players blocks for a prediction payload
   backtest.py      collect → tune (2024-25) → ablation on 2025-26 → bookmaker benchmark → UCL section;
