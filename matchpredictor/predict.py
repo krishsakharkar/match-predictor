@@ -163,7 +163,9 @@ def fit_joint(df: pd.DataFrame, as_of: date, xg_weight: float = 0.0, xi: float =
               years: int = 4) -> JointModel | None:
     comps = config.competitions()
     europe = [k for k, v in comps.items() if v["type"] == "europe"]
-    lgs = list(config.leagues()) + list(config.extra_leagues())
+    lgs = list(config.leagues())
+    if config.settings()["model"].get("joint_extra_leagues"):   # stored either way; off: hurt 2024-25 UCL log loss
+        lgs += list(config.extra_leagues())
     as_of_ts = pd.Timestamp(as_of)
     h = df[(df.status == "FT") & df.fthg.notna() & df.league.isin(lgs + europe) & (df.date < as_of_ts)
            & (df.date >= as_of_ts - pd.Timedelta(days=365 * years))]

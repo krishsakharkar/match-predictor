@@ -89,7 +89,9 @@ site/  index.html (all pages as tabs), results/corners/cards/shots/players.html 
    Dixon-Coles on `xg_weight·xG + (1−xg_weight)·goals`, blended geometrically with the Elo model.
 2. Cross-league (Champions League, cups vs. foreign/lower clubs): the **joint model** (`fit_joint`) —
    one DC fit over all leagues + European results (`data/history/ucl_results.csv` seed + live results);
-   European games link the leagues. Unseen clubs get the mean rating of Europe-only clubs and are
+   European games link the leagues. Results-only extra leagues (`type: "extra"`: POR, NED, TUR, …) are stored
+   but kept out of the fit (`model.joint_extra_leagues=false`: they worsened 2024-25 UCL log loss 0.915 → 0.924).
+   `model.cross_league_shrink` then calibrates confidence by matchup category (top / mixed / outside). Unseen clubs get the mean rating of Europe-only clubs and are
    flagged `thin_data`. If ClubElo is available and `factors.elo` is on, Elo is blended in; without the
    joint model, ClubElo alone (DC strength mapped onto the Elo scale) is the fallback. No rating at all
    → no prediction (never a guess).

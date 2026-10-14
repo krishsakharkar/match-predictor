@@ -405,3 +405,23 @@ def test_extra_leagues_never_displayed_and_parse():
     rows = football_data.parse_new_csv(text, "NOR", since="2021-07-01")
     assert len(rows) == 1 and rows[0]["fthg"] == 2 and rows[0]["season"] == "2425"
     assert config.canonical_team("Bodo/Glimt") == "Bodø/Glimt" and config.canonical_team("Sp Lisbon") == "Sporting CP"
+
+
+def test_joint_model_extra_leagues_switch(monkeypatch):
+    from matchpredictor import predict
+    rng = np.random.default_rng(1)
+    rows, d0 = [], pd.Timestamp("2025-08-01")
+    for i in range(120):
+        lg, a, b = [("EPL", "Arsenal", "Chelsea"), ("EPL", "Chelsea", "Arsenal"), ("POR", "Benfica", "Sp Braga"),
+                    ("POR", "Sp Braga", "Benfica"), ("UCL", "Arsenal", "Benfica"), ("UCL", "Benfica", "Chelsea")][i % 6]
+        rows.append({"league": lg, "home": a, "away": b, "date": d0 + pd.Timedelta(days=i), "status": "FT",
+                     "fthg": float(rng.poisson(1.5)), "ftag": float(rng.poisson(1.1)), "xg_home": np.nan, "xg_away": np.nan})
+    df = pd.DataFrame(rows)
+    s = config.settings()
+    monkeypatch.setattr(config, "settings", lambda: s)       # settings() re-reads the file on every call
+    s["model"]["joint_extra_leagues"] = False
+    off = predict.fit_joint(df, pd.Timestamp("2026-01-01").date())
+    assert off is not None and not off.knows("Sp Braga")      # domestic-only extra-league club left out
+    s["model"]["joint_extra_leagues"] = True
+    on = predict.fit_joint(df, pd.Timestamp("2026-01-01").date())
+    assert on.knows("Sp Braga")

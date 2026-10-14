@@ -32,7 +32,8 @@
       "top": -0.3,
       "mixed": 0.0,
       "outside": 0.0
-    }
+    },
+    "joint_extra_leagues": false
   },
   "injuries": {
     "replacement_retention": 0.5,
