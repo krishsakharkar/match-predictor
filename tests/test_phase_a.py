@@ -425,3 +425,31 @@ def test_joint_model_extra_leagues_switch(monkeypatch):
     s["model"]["joint_extra_leagues"] = True
     on = predict.fit_joint(df, pd.Timestamp("2026-01-01").date())
     assert on.knows("Sp Braga")
+
+
+def test_openfootball_parse_ninety_minute_scores_and_dates():
+    from matchpredictor.ingest import openfootball
+    txt = """▪ League, Matchday 1
+  Tue Sep 16 2025
+    18:45  Athletic Club (ESP)     v Arsenal FC (ENG)         0-2 (0-0)
+           PSV (NED)               v Royale Union Saint-Gilloise (BEL)  1-3 (0-2)
+  Wed Jan 21
+    21:00  Juventus FC (ITA)       v Galatasaray SK (TUR)     3-2 a.e.t. (3-0, 1-0)
+           Paris Saint-Germain FC (FRA) v Arsenal FC (ENG)         4-3 pen. 1-1 a.e.t. (1-1, 0-1)
+"""
+    rows = openfootball.parse(txt, 2025)
+    assert [(r["home"], r["away"], r["home_goals"], r["away_goals"]) for r in rows] == [
+        ("Athletic Club", "Arsenal FC", 0, 2), ("PSV", "Royale Union Saint-Gilloise", 1, 3),
+        ("Juventus FC", "Galatasaray SK", 3, 0), ("Paris Saint-Germain FC", "Arsenal FC", 1, 1)]
+    assert rows[0]["kickoff_utc"] == "2025-09-16T16:45:00+00:00"          # CEST
+    assert rows[1]["kickoff_utc"] == rows[0]["kickoff_utc"]                # time carries over
+    assert rows[2]["date"] == "2026-01-21" and rows[2]["kickoff_utc"].startswith("2026-01-21T20:00")  # CET
+
+
+def test_seed_names_are_canonical():
+    import csv
+    aliases = json.loads((config.CONFIG_DIR / "team_aliases.json").read_text())
+    for path in sorted(config.ROOT.joinpath("data", "history").glob("ucl_results*.csv")):
+        for r in csv.DictReader(open(path, encoding="utf-8")):
+            for t in (r["home"], r["away"]):
+                assert aliases.get(t, t) == t, (path.name, t)

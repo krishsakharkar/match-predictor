@@ -63,6 +63,7 @@ matchpredictor/
     api_football.py   fixtures/referees, injuries, lineups, penalties (events), season history; disk cache
                       for historical calls, 6.5 s pacing + one retry (free plan: 10/min, 100/day)
     odds_api.py       /events (free fixtures for every competition), /scores (results)
+    openfootball.py   Football.TXT parser (90-minute scores, CET kickoffs) used to build European seed CSVs
   models/
     dixon_coles.py    DC fit; Poisson targets may be a goals/xG blend, tau uses real scores
     elo.py            Elo→goals (per-competition HFA), geometric blend, DC→Elo map, rest feature, 1-D fits
@@ -88,7 +89,9 @@ site/  index.html (all pages as tabs), results/corners/cards/shots/players.html 
 1. Same-league game (league match, or domestic cup between two clubs of one modelled league):
    Dixon-Coles on `xg_weight·xG + (1−xg_weight)·goals`, blended geometrically with the Elo model.
 2. Cross-league (Champions League, cups vs. foreign/lower clubs): the **joint model** (`fit_joint`) —
-   one DC fit over all leagues + European results (`data/history/ucl_results.csv` seed + live results);
+   one DC fit over all leagues + European results (`data/history/ucl_results*.csv` seeds: 2022-25 from
+   API-Football, 2025-26 from openfootball via `ingest/openfootball.py`; + live results). The most recent
+   European season matters most: adding 2025-26 cut log loss on the first 18 2026-27 UCL games 1.035 → 0.922;
    European games link the leagues. Results-only extra leagues (`type: "extra"`: POR, NED, TUR, …) are stored
    but kept out of the fit (`model.joint_extra_leagues=false`: they worsened 2024-25 UCL log loss 0.915 → 0.924).
    `model.cross_league_shrink` then calibrates confidence by matchup category (top / mixed / outside). Unseen clubs get the mean rating of Europe-only clubs and are
@@ -129,6 +132,7 @@ site/  index.html (all pages as tabs), results/corners/cards/shots/players.html 
 - Site is plain HTML/CSS/JS (no build step, no external libraries); dark theme, mobile-first.
 
 ### Data quirks
+- GitHub's hourly cron is unreliable (2026-10-14 fired only 3 times), so the gate's results window is 2-12 h.
 - Understat multi-club player titles ("Club A,Club B") are alphabetical, not chronological, and were
   corrupted for Ligue 1 2026-27 (31 PSG/Rennes players merged): such players are skipped, and a team
   whose stored player minutes cover < 70% of its games (`absences.covered`) falls back to last season.
