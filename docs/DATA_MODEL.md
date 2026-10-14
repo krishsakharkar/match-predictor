@@ -10,9 +10,13 @@ Three SQLite files, each with one job:
 
 ## Conventions (warehouse)
 
-- **Club names** are football-data.co.uk spellings (`Man City`, `Ath Madrid`, `Nott'm Forest`). API-Football and
-  Understat names are mapped through `config/team_aliases.json`; an API club is mapped onto one of ours only if
-  its country agrees, otherwise it keeps the API name (a Finnish *Inter Turku* never becomes *Inter*).
+- **Club names** are football-data.co.uk spellings (`Man City`, `Ath Madrid`, `Nott'm Forest`). An API-Football
+  club takes one of our names by evidence first: its matches in our competitions line up with ours on date (±1
+  day) and score at least 3 times (≥ 70% of its aligned matches). Otherwise a name match counts only when the
+  countries agree, and never for youth / reserve / women's sides (*Manchester United U21* is not *Man United*).
+  Each of our names belongs to one API club; any other club keeps its own name (made unique with its country).
+- **Only played (or scheduled) fixtures** are merged: cancelled, postponed, abandoned and awarded API fixtures are
+  skipped. A league game matched once cannot be claimed again (a play-off between the same clubs is its own match).
 - **Match ids** follow `db.match_id`: top-level leagues `COMP:season:home:away`, everything else (cups,
   Europe, extra leagues) `COMP:date:home:away`. Competitions we don't configure are `AF<league id>`.
 - **Seasons** are July-June codes: `2526` = 2025-26. API-Football's season year 2025 is `2526`.
@@ -68,8 +72,14 @@ stays first for xG because the result model was tuned on it (`model.xg_weight`).
 
 ## Checks run on every build (`build_log`)
 
-- score disagreements between our results and API-Football's 90-minute score;
+- scores corrected to 90 minutes (old seeds that included extra time, fixed from API-Football's 90-minute score);
+- score disagreements between our results and API-Football's 90-minute score (expected: a handful of awarded
+  games, where football-data has the official awarded score and API-Football the score on the pitch);
 - possible duplicate matches (same competition, date and home team);
+- one API club matching two of our names (a spelling split in a source: add an alias);
 - tracked clubs without an API-Football id.
+
+Last full build (2026-10-14): 56.5k matches, 950k player-match rows, 1.58M lineup rows, 618k events, 125k injury
+records; 5 disagreements (all awarded games), 5 possible duplicates (amateur cup ties), 0 spelling splits.
 
 A non-zero count is a data problem to look at, not something to ignore.

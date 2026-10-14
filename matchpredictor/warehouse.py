@@ -71,6 +71,10 @@ CREATE TABLE transfers (player_id TEXT, player TEXT, date TEXT, type TEXT, team_
 CREATE TABLE build_log (step TEXT PRIMARY KEY, rows INTEGER, note TEXT);
 """
 
+# youth, reserve and women's sides: never mapped onto a senior club by name
+_YOUTH = re.compile(r"(\bU-?\d{2}\b|\bII\b|\bB\b$|\bW\b|\bWomen\b|\bFemenino\b|\bFrauen\b|\bReserves?\b|\bJong\b|"
+                    r"\bPrimavera\b|\bAcademy\b|\bYouth\b|\bJuvenil\b|\bSub-?\d{2}\b)", re.I)
+
 # API-Football team statistic name -> team_match_stats column
 AF_STAT = {"Total Shots": "shots", "Shots on Goal": "shots_on_target", "Shots insidebox": "shots_inside_box",
            "Corner Kicks": "corners", "Fouls": "fouls", "Offsides": "offsides", "Yellow Cards": "yellow",
@@ -134,6 +138,8 @@ class Builder:
         self.comp_type: dict[str, str] = {}       # comp -> league | extra | europe | cup | ...
         self.comp_country: dict[str, str] = {}    # comp -> country name as API-Football writes it
         self.score_mismatch: list[str] = []
+        self.score_fixed: list[str] = []
+        self.top_leagues = set(config.leagues())   # pairing happens once per season (match id without date)
 
     def _log(self, step: str, rows: int, note: str = "") -> None:
         self.log[step] = (rows, note)
@@ -183,16 +189,7 @@ class Builder:
             tracked |= set(load_team_list())
         except (IndexError, OSError):
             pass
-        af_map: dict[int, str] = {}
-        if self.has_af:
-            for tid, name, ours, country in self.w.execute(
-                    "SELECT team_id, name, our_name, country FROM d.af_teams").fetchall():
-                cand = ours or config.canonical_team(name, known)
-                if cand in known and not ours and country and country != "World":
-                    ours_country = country_of_comp.get(domestic.get(cand))
-                    if ours_country and _norm(ours_country) != _norm(country):
-                        cand = name                      # same name, different country: a different club
-                af_map[tid] = cand if (cand in known or ours) else name
+        af_map = self.map_af_teams(known, domestic, af_to_comp) if self.has_af else {}
         for team in sorted(known | set(af_map.values())):
             self.w.execute("INSERT OR IGNORE INTO teams VALUES (?,?,?,?,?)",
                            (team, country_of_comp.get(domestic.get(team)), None, int(team in tracked),
@@ -201,6 +198,86 @@ class Builder:
             self.w.execute("UPDATE teams SET af_team_id=COALESCE(af_team_id, ?) WHERE team=?", (tid, team))
         self._log("teams", self.w.execute("SELECT COUNT(*) FROM teams").fetchone()[0])
         return af_map
+
+    # ---------------------------------------------------------------- club mapping
+    def map_af_teams(self, known: set[str], domestic: dict[str, str], af_to_comp: dict[int, str]) -> dict[int, str]:
+        """{API team id: warehouse club name}. Evidence first, names second:
+        1. trusted: af_teams.our_name (the team list, resolved by the backfill)
+        2. fixture alignment: an API club whose matches in one of our competitions line up with ours on
+           date (+-1 day) and score at least 3 times, in >= 70% of its aligned matches, takes that name
+        3. name match (alias / exact / fuzzy) only when the countries agree, never for youth, reserve or
+           women's sides ('Manchester United U21' is not Man United)
+        Each of our names goes to one API club (the one with the most evidence); every other API club keeps
+        its own name, made unique with its country when it collides."""
+        rows = self.w.execute("SELECT team_id, name, our_name, country FROM d.af_teams").fetchall()
+        # country of every API club: its own, else the country of the competitions it plays in
+        comp_country = {r[0]: r[1] for r in self.w.execute("SELECT league_id, country FROM d.af_competitions")}
+        played = defaultdict(Counter)
+        for lid, h, a in self.w.execute("SELECT league_id, home_id, away_id FROM d.af_fixtures"):
+            c = comp_country.get(lid)
+            if c and c != "World":
+                played[h][c] += 1
+                played[a][c] += 1
+        country = {tid: (c if c and c != "World" else (played[tid].most_common(1)[0][0] if played[tid] else None))
+                   for tid, _, _, c in rows}
+        # evidence: fixture alignment in our competitions
+        ours_by = defaultdict(list)
+        for comp, d_, h, a, hg, ag in self.w.execute(
+                "SELECT league, date, home, away, fthg, ftag FROM m.matches WHERE status='FT' AND fthg IS NOT NULL"):
+            ours_by[(comp, d_)].append((h, a, hg, ag))
+        votes = defaultdict(Counter)
+        for lid, d_, hid, aid, st, hg, ag, eth, eta in self.w.execute(
+                "SELECT league_id, date, home_id, away_id, status, home_goals, away_goals, et_home, et_away "
+                "FROM d.af_fixtures WHERE status IN ('FT','AET','PEN')"):
+            comp = af_to_comp.get(lid)
+            if not comp or comp.startswith("AF") or not d_:
+                continue
+            if st != "FT":
+                hg, ag = hg - (eth or 0), ag - (eta or 0)
+            day = date.fromisoformat(d_)
+            cands = [m for k in (-1, 0, 1) for m in ours_by.get((comp, (day + timedelta(days=k)).isoformat()), [])
+                     if (m[2], m[3]) == (hg, ag)]
+            if len(cands) == 1:
+                votes[hid][cands[0][0]] += 1
+                votes[aid][cands[0][1]] += 1
+        claim: dict[int, tuple[str, float]] = {}        # API id -> (our name, strength)
+        for tid, name, ours, _ in rows:
+            if ours:
+                claim[tid] = (ours, 1e9)
+                continue
+            v = votes.get(tid)
+            if v:
+                best, n = v.most_common(1)[0]
+                if n >= 3 and n >= 0.7 * sum(v.values()):
+                    claim[tid] = (best, float(n))
+                    continue
+            if _YOUTH.search(name or ""):
+                continue
+            cand = config.canonical_team(name, known)
+            if cand in known:
+                ours_country = self.comp_country.get(domestic.get(cand))
+                if country.get(tid) and ours_country and _norm(ours_country) == _norm(country[tid]):
+                    claim[tid] = (cand, 0.5 + sum(played[tid].values()) / 1e6)
+                elif not ours_country and country.get(tid) is None and cand == name:
+                    claim[tid] = (cand, 0.1)            # same exact name, nothing to contradict it
+        owner: dict[str, int] = {}
+        for tid, (name, strength) in claim.items():
+            if name not in owner or strength > claim[owner[name]][1]:
+                owner[name] = tid
+        out, used = {}, set(known)
+        for tid, name, _, _ in rows:
+            if tid in claim and owner.get(claim[tid][0]) == tid:
+                out[tid] = claim[tid][0]
+                continue
+            own = name or f"team {tid}"
+            if own in used:
+                own = f"{own} ({country.get(tid) or tid})"
+                if own in used:
+                    own = f"{name} #{tid}"
+            out[tid] = own
+            used.add(own)
+        self.mapping_votes, self.af_claims = votes, claim
+        return out
 
     # ---------------------------------------------------------------- matches
     def matches(self, af_to_comp: dict[int, str], af_team: dict[int, str]) -> dict[int, str]:
@@ -221,6 +298,7 @@ class Builder:
         for mid, comp, d_, h, a in self.w.execute("SELECT match_id, comp, date, home, away FROM matches"):
             by_pair[(comp, h, a)].append((d_, mid))
         added = merged = 0
+        claimed: set[str] = set()          # match ids already matched to an API fixture
         have = {r[1] for r in self.w.execute("PRAGMA d.table_info(af_fixtures)")}
         ft = "ft_home, ft_away" if "ft_home" in have else "NULL, NULL"     # older detail.db / archives
         rows = self.w.execute(
@@ -229,6 +307,8 @@ class Builder:
             "FROM d.af_fixtures").fetchall()
         for (fid, lid, season, rnd, d_, ko, ref, venue, st, hid, aid, hname, aname, hg, ag, hth, hta, eth, eta,
              penh, pena, fth, fta) in rows:
+            if st not in FINISHED and st not in ("NS", "TBD"):
+                continue        # cancelled, postponed, abandoned, awarded: not a match that was (or will be) played
             comp = af_to_comp.get(lid, f"AF{lid}")
             home, away = af_team.get(hid, hname), af_team.get(aid, aname)
             finished = st in FINISHED
@@ -236,17 +316,24 @@ class Builder:
                 fth, fta = (hg - (eth or 0), ag - (eta or 0)) if st in ("AET", "PEN") else (hg, ag)
             mid = None
             for md, cand in by_pair.get((comp, home, away), []):
+                if cand in claimed:
+                    continue
                 if md and d_ and abs((date.fromisoformat(md) - date.fromisoformat(d_)).days) <= 3:
                     mid = cand
                     break
-            if mid is None and types.get(comp) in ("league", "extra"):
+            if mid is None and comp in self.top_leagues:       # one pairing per season: rescheduled games still merge
                 hit = self.w.execute("SELECT match_id FROM matches WHERE comp=? AND season=? AND home=? AND away=?",
                                      (comp, af_season_code(season), home, away)).fetchone()
-                mid = hit[0] if hit else None
+                mid = hit[0] if hit and hit[0] not in claimed else None   # a play-off is not the league game
             if mid and finished and fth is not None:
                 ours = self.w.execute("SELECT home_goals, away_goals FROM matches WHERE match_id=?", (mid,)).fetchone()
                 if ours and ours[0] is not None and (ours[0], ours[1]) != (fth, fta):
-                    self.score_mismatch.append(f"{mid}: ours {ours[0]}-{ours[1]}, API-Football {fth}-{fta} ({st})")
+                    if st in ("AET", "PEN") and (ours[0], ours[1]) == (hg, ag):
+                        # our seed stored the score after extra time: API-Football's 90-minute score is right
+                        self.w.execute("UPDATE matches SET home_goals=?, away_goals=? WHERE match_id=?", (fth, fta, mid))
+                        self.score_fixed.append(mid)
+                    else:
+                        self.score_mismatch.append(f"{mid}: ours {ours[0]}-{ours[1]}, API-Football {fth}-{fta} ({st})")
             if mid:
                 self.w.execute(
                     "UPDATE matches SET af_fixture_id=?, round=COALESCE(round, ?), venue=COALESCE(venue, ?), "
@@ -259,9 +346,11 @@ class Builder:
                 merged += 1
             else:
                 season_code = config.season_code(d_) if d_ else af_season_code(season)
-                # same id rules as db.match_id: only top-level leagues omit the date
-                mid = (f"{comp}:{season_code}:{home}:{away}" if types.get(comp) == "league"
-                       else f"{comp}:{d_}:{home}:{away}")
+                # same id rules as db.match_id: only our top-level leagues omit the date (and a second game of the
+                # same pairing in one season - a play-off - gets the dated form)
+                mid = f"{comp}:{season_code}:{home}:{away}" if comp in self.top_leagues else f"{comp}:{d_}:{home}:{away}"
+                if self.w.execute("SELECT 1 FROM matches WHERE match_id=?", (mid,)).fetchone():
+                    mid = f"{comp}:{d_}:{home}:{away}"
                 self.w.execute(
                     "INSERT OR IGNORE INTO matches (match_id, comp, season, date, kickoff_utc, round, home, away, "
                     "status, home_goals, away_goals, ht_home, ht_away, et_home, et_away, pen_home, pen_away, referee, "
@@ -272,6 +361,7 @@ class Builder:
                 by_pair[(comp, home, away)].append((d_, mid))
                 added += 1
             fixture_to_match[fid] = mid
+            claimed.add(mid)
         self._log("matches", self.w.execute("SELECT COUNT(*) FROM matches").fetchone()[0],
                   f"{merged} API-Football fixtures merged onto existing matches, {added} added")
         return fixture_to_match
@@ -447,11 +537,16 @@ class Builder:
     def checks(self) -> list[str]:
         """Cross-source sanity checks; problems are logged in build_log, not hidden."""
         out = []
+        out.append(f"scores corrected to 90 minutes (extra time had been included): {len(self.score_fixed)}")
         out.append(f"score disagreements, our data vs API-Football 90-minute score: {len(self.score_mismatch)}"
                    + (f" e.g. {self.score_mismatch[:3]}" if self.score_mismatch else ""))
         dup = self.w.execute("""SELECT COUNT(*) FROM (SELECT comp, date, home FROM matches WHERE status='FT'
             GROUP BY comp, date, home HAVING COUNT(*) > 1)""").fetchone()[0]
         out.append(f"possible duplicate matches (same comp, date, home): {dup}")
+        split = sorted({tuple(sorted(n for n, k in v.items() if k >= 3)) for v in getattr(self, "mapping_votes", {}).values()
+                        if sum(1 for k in v.values() if k >= 3) > 1})
+        out.append(f"one API club matching two of our names (spelling split - add an alias): {len(split)}"
+                   + (f" {split[:5]}" if split else ""))
         lost = self.w.execute("SELECT COUNT(*) FROM teams WHERE tracked=1 AND af_team_id IS NULL").fetchone()[0]
         out.append(f"tracked clubs without an API-Football id: {lost}")
         for i, note in enumerate(out):

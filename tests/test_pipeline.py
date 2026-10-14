@@ -395,3 +395,14 @@ def test_sync_fixtures_one_european_competition_per_club(conn, monkeypatch):
     pipeline.sync_fixtures(conn, notes)
     assert conn.execute("SELECT COUNT(*) FROM matches WHERE league='UECL'").fetchone()[0] == 0
     assert any("Inter Turku" in n for n in notes)
+
+
+def test_load_seed_drops_rows_of_a_corrected_seed(conn, tmp_path, monkeypatch):
+    from matchpredictor import history
+    monkeypatch.setattr(history, "SEED_DIR", tmp_path)
+    head = "competition,season,date,kickoff_utc,home,away,home_goals,away_goals,referee\n"
+    (tmp_path / "ucl.csv").write_text(head + "UCL,2223,2022-09-07,,Ajax,Angers,4,0,\n")
+    history.load_seed(conn)
+    (tmp_path / "ucl.csv").write_text(head + "UCL,2223,2022-09-07,,Ajax,Rangers,4,0,\n")    # name fixed
+    history.load_seed(conn)
+    assert [r[0] for r in conn.execute("SELECT away FROM matches WHERE league='UCL'")] == ["Rangers"]

@@ -185,12 +185,19 @@ def parse_new_csv(text: str, league: str, since: str) -> list[dict]:
     return out
 
 
+EXTRA_NAMES_VERSION = 2      # bump to wipe and reload the extra leagues (v2: no fuzzy name matching)
+
+
 def update_extra(conn, current_season: str, notes: list[str]) -> dict:
-    """Results for the extra leagues, with team names mapped onto the names used in European games."""
+    """Results for the extra leagues. Names map onto the names used in European games only through explicit
+    aliases (config/team_aliases.json), never by fuzzy matching: that turned Aris into 'Paris FC' and
+    Rangers into 'Angers' (v1, fixed 2026-10-14)."""
     seasons = config.previous_seasons(current_season, config.settings()["history_seasons"]) + [current_season]
     since = f"20{seasons[0][:2]}-07-01"
-    known = {r[0] for r in conn.execute("SELECT home FROM matches UNION SELECT away FROM matches")}
+    aliases = config._aliases()
+    repair = (db.get_param(conn, "extra_names_version") or 1) < EXTRA_NAMES_VERSION
     out = {}
+    failed = False
     for key, lg in config.extra_leagues().items():
         rows = []
         if lg.get("football_data_new"):
@@ -199,7 +206,7 @@ def update_extra(conn, current_season: str, notes: list[str]) -> dict:
                 rows = parse_new_csv(text, key, since)
         else:
             for s in seasons:
-                if s != current_season and season_complete(conn, key, s):
+                if s != current_season and season_complete(conn, key, s) and not repair:
                     continue
                 text = _get(PRIMARY.format(season=s, code=lg["football_data_code"]))
                 if text and "HomeTeam" in text:
@@ -207,11 +214,18 @@ def update_extra(conn, current_season: str, notes: list[str]) -> dict:
         if not rows:
             notes.append(f"{lg['name']}: results unavailable (football-data.co.uk unreachable?) - its clubs are "
                          "rated from European games only")
+            failed = True
             continue
+        if repair:      # rows stored under wrong names: replace this league's results with the fresh download
+            conn.execute("DELETE FROM matches WHERE league=? AND status='FT' AND source IN ('football-data','mirror')",
+                         (key,))
         for r in rows:
-            r["home"] = config.canonical_team(r["home"], known)
-            r["away"] = config.canonical_team(r["away"], known)
+            r["home"] = aliases.get(r["home"].strip(), r["home"].strip())
+            r["away"] = aliases.get(r["away"].strip(), r["away"].strip())
             db.upsert_match(conn, r)
         out[key] = len(rows)
+    if repair and out and not failed:
+        from .http_cache import iso, now_utc
+        db.set_param(conn, "extra_names_version", EXTRA_NAMES_VERSION, iso(now_utc()))
     conn.commit()
     return out

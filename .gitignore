@@ -8,3 +8,5 @@ data/cache/
 data/detail.db
 data/warehouse.db
 data/warehouse.building
+data/detail.db-*
+data/warehouse.db-*

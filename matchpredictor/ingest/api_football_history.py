@@ -49,6 +49,16 @@ def _f(x):
         return None
 
 
+_COUNTRY_SYNONYMS = {"czech republic": "czechia", "czech-republic": "czechia", "turkiye": "turkey",
+                     "türkiye": "turkey", "holland": "netherlands"}
+
+
+def same_country(a: str | None, b: str | None) -> bool:
+    """'Czech-Republic' (API-Football) and 'Czechia' (team list) are the same; unknown on either side = no."""
+    norm = lambda x: _COUNTRY_SYNONYMS.get((x or "").strip().lower(), (x or "").strip().lower())
+    return bool(a and b) and norm(a) == norm(b)
+
+
 class Backfill:
     def __init__(self, conn, dconn, notes: list[str], client: Client | None = None):
         self.conn, self.d, self.notes = conn, dconn, notes
@@ -100,9 +110,11 @@ class Backfill:
 
     # ---------------------------------------------------------------- 1. team ids
     def team_ids(self, our_teams: dict[str, dict], season: int) -> dict[str, int]:
-        """{our name: API team id} for the clubs in the team list."""
-        have = {r["our_name"]: r["team_id"] for r in self.d.execute(
-            "SELECT our_name, team_id FROM af_teams WHERE our_name IS NOT NULL")}
+        """{our name: API team id} for the clubs in the team list. A name match only counts when the API club's
+        country is the team list's country, and each of our clubs gets exactly one API id (2026-10-14: the
+        Champions League qualifier Inter Club d'Escaldes, Andorra, had been matched to Inter)."""
+        self._repair_team_ids(our_teams)
+        have = self._have()
         missing = [t for t in our_teams if t not in have]
         if not missing:
             return {t: have[t] for t in our_teams}
@@ -116,22 +128,54 @@ class Backfill:
             for item in self._call("/teams", {"league": lid, "season": season}).get("response") or []:
                 tm = item["team"]
                 ours = config.canonical_team(tm["name"], known)
-                if ours not in known:
+                want = our_teams.get(ours, {}).get("country") if ours in known else None
+                if ours not in known or ours in have or \
+                        (want and tm.get("country") and not same_country(tm.get("country"), want)):
+                    ours = None
+                if ours is None:
                     unmapped.append(tm["name"])
+                else:
+                    have[ours] = tm["id"]
                 self.d.execute(
                     "INSERT INTO af_teams (team_id, name, our_name, country, code, founded) VALUES (?,?,?,?,?,?) "
                     "ON CONFLICT(team_id) DO UPDATE SET name=excluded.name, country=excluded.country, "
                     "our_name=COALESCE(af_teams.our_name, excluded.our_name)",
-                    (tm["id"], tm["name"], ours if ours in known else None, tm.get("country"), tm.get("code"),
-                     tm.get("founded")))
+                    (tm["id"], tm["name"], ours, tm.get("country"), tm.get("code"), tm.get("founded")))
         self.d.commit()
-        have = {r["our_name"]: r["team_id"] for r in self.d.execute(
-            "SELECT our_name, team_id FROM af_teams WHERE our_name IS NOT NULL")}
+        have = self._have()
         unmatched = [t for t in our_teams if t not in have]
         if unmatched:
             self.notes.append(f"API-Football: no team id for {unmatched}; unmapped API names in those competitions: "
                               f"{sorted(set(unmapped))} (add an alias in config/team_aliases.json)")
         return {t: have[t] for t in our_teams if t in have}
+
+    def _have(self) -> dict[str, int]:
+        return {r[0]: r[1] for r in self.d.execute(
+            "SELECT our_name, team_id FROM af_teams WHERE our_name IS NOT NULL ORDER BY team_id")}
+
+    def _repair_team_ids(self, our_teams: dict[str, dict]) -> None:
+        """Drop links whose country contradicts the team list, then keep one API id per club (the one whose
+        name matches exactly or through an alias, else the lowest id). Dropped clubs keep their own data rows;
+        they are simply no longer treated as one of ours, and the right club is fetched on the next run."""
+        rows = self.d.execute("SELECT team_id, name, our_name, country FROM af_teams WHERE our_name IS NOT NULL").fetchall()
+        aliases = config._aliases()
+        by_name = {}
+        for tid, name, ours, country in rows:
+            want = (our_teams.get(ours) or {}).get("country")
+            if ours not in our_teams or (country and want and not same_country(country, want)):
+                self.d.execute("UPDATE af_teams SET our_name=NULL WHERE team_id=?", (tid,))
+                self.notes.append(f"API-Football: {name} ({country}) is not {ours} - link removed")
+                continue
+            by_name.setdefault(ours, []).append((tid, name))
+        for ours, cands in by_name.items():
+            if len(cands) < 2:
+                continue
+            best = min(cands, key=lambda c: (not (c[1] == ours or aliases.get(c[1]) == ours), c[0]))
+            for tid, name in cands:
+                if tid != best[0]:
+                    self.d.execute("UPDATE af_teams SET our_name=NULL WHERE team_id=?", (tid,))
+                    self.notes.append(f"API-Football: {name} also claimed {ours} - link removed")
+        self.d.commit()
 
     # ---------------------------------------------------------------- 2. competitions
     def competitions(self, team_id: int, season: int, current: int) -> None:
