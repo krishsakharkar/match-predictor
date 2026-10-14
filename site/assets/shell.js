@@ -27,7 +27,7 @@
         ${page.top ? page.top(d, ms) : ""}
         <h2>Upcoming</h2>${upcoming.length ? MP.grouped(upcoming, page.card) : `<div class="empty">No fixtures in the next 7 days.</div>`}
         <h2>Results</h2>${played.length ? MP.grouped(played, page.card) : `<div class="empty">No results in the last 7 days.</div>`}
-        <p class="muted small">Updated ${esc(new Date(d.generated_at).toLocaleString())} · model ${esc(d.model_version)}</p>`;
+        <p class="muted small">Updated ${esc(MP.stamp(d.generated_at))} · model ${esc(d.model_version)}</p>`;
       app.querySelectorAll("[data-tab]").forEach(b => b.addEventListener("click", () => {
         tab = b.dataset.tab; MP.store.set("mp.tab", tab); history.replaceState(null, "", "#" + tab); draw();
       }));
