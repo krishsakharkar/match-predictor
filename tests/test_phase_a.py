@@ -674,3 +674,21 @@ def test_api_football_history_retries_dropped_connections(tmp_path, monkeypatch)
     out = afh.Backfill(None, detail.connect(tmp_path / "d.db"), [], client=fake).run(
         {"Arsenal": {"competitions": ["EPL"]}}, current=2026, first=2026)
     assert out["complete"] and fails["n"] == 0
+
+
+def test_extra_league_names_never_fuzzy_matched(conn, monkeypatch):
+    from matchpredictor.ingest import football_data
+    db.upsert_match(conn, {"league": "LIGUE1", "season": "2526", "date": "2025-08-17", "home": "Angers",
+                           "away": "Paris FC", "status": "FT", "fthg": 1, "ftag": 0, "source": "football-data"})
+    # a v1 row stored under a fuzzy-matched name
+    db.upsert_match(conn, {"league": "GRE", "season": "2526", "date": "2025-09-01", "home": "Paris FC",
+                           "away": "PAOK", "status": "FT", "fthg": 1, "ftag": 1, "source": "football-data"})
+    csv = ("Div,Date,Time,HomeTeam,AwayTeam,FTHG,FTAG,FTR\n"
+           "G1,01/09/2025,18:00,Aris,PAOK,1,1,D\nG1,02/09/2025,18:00,Rangers,Sp Lisbon,2,0,H\n")
+    monkeypatch.setattr(config, "extra_leagues", lambda: {"GRE": {"name": "Greek Super League", "football_data_code": "G1"}})
+    monkeypatch.setattr(football_data, "_get", lambda url: csv)
+    monkeypatch.setattr(football_data, "season_complete", lambda *a: False)
+    football_data.update_extra(conn, "2526", [])
+    teams = {r[0] for r in conn.execute("SELECT home FROM matches WHERE league='GRE' UNION SELECT away FROM matches WHERE league='GRE'")}
+    assert teams == {"Aris", "PAOK", "Rangers", "Sporting CP"}          # aliases apply, fuzzy matches don't
+    assert db.get_param(conn, "extra_names_version") == football_data.EXTRA_NAMES_VERSION

@@ -188,14 +188,20 @@ def load_seed(conn) -> int:
     """Results committed to the repo (data/history/*.csv), e.g. past Champions League seasons, so the
     cross-league model works even when no live source for them is available."""
     import csv
-    n = 0
+    n, ids = 0, set()
     for path in sorted(SEED_DIR.glob("*.csv")):
         for r in csv.DictReader(open(path, encoding="utf-8")):
-            db.upsert_match(conn, {"league": r["competition"], "season": r["season"], "date": r["date"],
-                                   "kickoff_utc": r.get("kickoff_utc") or None, "home": r["home"], "away": r["away"],
-                                   "status": "FT", "fthg": int(r["home_goals"]), "ftag": int(r["away_goals"]),
-                                   "referee": r.get("referee") or None, "source": "seed"})
+            ids.add(db.upsert_match(conn, {"league": r["competition"], "season": r["season"], "date": r["date"],
+                                           "kickoff_utc": r.get("kickoff_utc") or None, "home": r["home"],
+                                           "away": r["away"], "status": "FT", "fthg": int(r["home_goals"]),
+                                           "ftag": int(r["away_goals"]), "referee": r.get("referee") or None,
+                                           "source": "seed"}))
             n += 1
+    # a corrected seed file (e.g. a club name fixed) must not leave its old rows behind as duplicates
+    stale = [r[0] for r in conn.execute("SELECT id FROM matches WHERE source='seed'") if r[0] not in ids]
+    if ids:
+        conn.executemany("DELETE FROM matches WHERE id=? AND id NOT IN (SELECT match_id FROM predictions)",
+                         [(i,) for i in stale])
     conn.commit()
     return n
 

@@ -146,6 +146,9 @@ site/  index.html (all pages as tabs), results/corners/cards/shots/players.html 
 - Site is plain HTML/CSS/JS (no build step, no external libraries); dark theme, mobile-first.
 
 ### Data quirks
+- Never fuzzy-match club names across leagues: v1 of the extra-league loader turned Aris into 'Paris FC' and
+  Rangers into 'Angers' (also in the 2022-23 UCL seed). Extra leagues map names through aliases only
+  (`football_data.EXTRA_NAMES_VERSION` wipes + reloads them once); the warehouse maps API clubs by fixture evidence.
 - GitHub's hourly cron is unreliable (2026-10-14 fired only 3 times), so the gate's results window is 2-12 h.
 - Understat multi-club player titles ("Club A,Club B") are alphabetical, not chronological, and were
   corrupted for Ligue 1 2026-27 (31 PSG/Rennes players merged): such players are skipped, and a team
