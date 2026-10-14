@@ -12,7 +12,8 @@ Three SQLite files, each with one job:
 
 - **Club names** are football-data.co.uk spellings (`Man City`, `Ath Madrid`, `Nott'm Forest`). An API-Football
   club takes one of our names by evidence first: its matches in our competitions line up with ours on date (±1
-  day) and score at least 3 times (≥ 70% of its aligned matches). Otherwise a name match counts only when the
+  day) and score at least 3 times (≥ 70% of its aligned matches); on a busy matchday with several games of that score
+  the opponent's already-known name decides. Otherwise a name match counts only when the
   countries agree, and never for youth / reserve / women's sides (*Manchester United U21* is not *Man United*).
   Each of our names belongs to one API club; any other club keeps its own name (made unique with its country).
 - **Only played (or scheduled) fixtures** are merged: cancelled, postponed, abandoned and awarded API fixtures are
@@ -91,7 +92,8 @@ goal events = players' goals, 11 starters, sane minutes, cross-source agreement,
 - one API club matching two of our names (a spelling split in a source: add an alias);
 - tracked clubs without an API-Football id.
 
-Last full build (2026-10-14): 56.5k matches, 950k player-match rows, 1.58M lineup rows, 618k events, 125k injury
-records; 5 disagreements (all awarded games), 5 possible duplicates (amateur cup ties), 0 spelling splits.
+Last full build (2026-10-14): 61.7k matches, 990k player-match rows, 1.65M lineup rows, 645k events, 131k injury
+records; 5 disagreements (all awarded games), 2 possible duplicates (inside API-Football's own amateur-cup data),
+0 spelling splits.
 
 A non-zero count is a data problem to look at, not something to ignore.

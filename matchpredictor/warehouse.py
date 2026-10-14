@@ -229,7 +229,7 @@ class Builder:
         for comp, d_, h, a, hg, ag in self.w.execute(
                 "SELECT league, date, home, away, fthg, ftag FROM m.matches WHERE status='FT' AND fthg IS NOT NULL"):
             ours_by[(comp, d_)].append((h, a, hg, ag))
-        votes = defaultdict(Counter)
+        aligned = []                     # (home id, away id, candidate matches of ours: same day first, else +-1)
         for lid, d_, hid, aid, st, hg, ag, eth, eta in self.w.execute(
                 "SELECT league_id, date, home_id, away_id, status, home_goals, away_goals, et_home, et_away "
                 "FROM d.af_fixtures WHERE status IN ('FT','AET','PEN')"):
@@ -239,11 +239,26 @@ class Builder:
             if st != "FT":
                 hg, ag = hg - (eth or 0), ag - (eta or 0)
             day = date.fromisoformat(d_)
-            cands = [m for k in (-1, 0, 1) for m in ours_by.get((comp, (day + timedelta(days=k)).isoformat()), [])
-                     if (m[2], m[3]) == (hg, ag)]
-            if len(cands) == 1:
-                votes[hid][cands[0][0]] += 1
-                votes[aid][cands[0][1]] += 1
+            cands = [m for m in ours_by.get((comp, d_), []) if (m[2], m[3]) == (hg, ag)] or \
+                [m for k in (-1, 1) for m in ours_by.get((comp, (day + timedelta(days=k)).isoformat()), [])
+                 if (m[2], m[3]) == (hg, ag)]
+            if cands:
+                aligned.append((hid, aid, cands))
+        names = {tid: (ours or name) for tid, name, ours, _ in rows}
+        votes = defaultdict(Counter)
+        for _ in range(2):
+            # pass 1: unambiguous alignments only; pass 2: a matchday with several games of that score is
+            # resolved by the opponent, whose name is already known (exact, or from the pass-1 evidence)
+            sure = {tid: v.most_common(1)[0][0] for tid, v in votes.items()
+                    if v.most_common(1)[0][1] >= 2 and v.most_common(1)[0][1] >= 0.7 * sum(v.values())}
+            votes = defaultdict(Counter)
+            for hid, aid, cands in aligned:
+                if len(cands) > 1:
+                    hn, an = sure.get(hid, names.get(hid)), sure.get(aid, names.get(aid))
+                    cands = [m for m in cands if m[0] == hn or m[1] == an]
+                if len(cands) == 1:
+                    votes[hid][cands[0][0]] += 1
+                    votes[aid][cands[0][1]] += 1
         claim: dict[int, tuple[str, float]] = {}        # API id -> (our name, strength)
         for tid, name, ours, _ in rows:
             if ours:
