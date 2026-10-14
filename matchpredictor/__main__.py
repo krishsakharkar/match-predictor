@@ -145,10 +145,10 @@ def main(argv=None):
                 from .ingest import api_football_history as afh
                 out["api_football"] = afh.Backfill(conn, dconn, notes).run(afh.load_team_list(), af_current)
             if args.export:
+                # every season, the current one included (re-written each run: it is the data that matters most)
                 out["exported"] = {f"{lg}_{s}": detail.export_archive(dconn, lg, s)
-                                   for lg, s in dconn.execute("SELECT DISTINCT league, season FROM detail_matches")
-                                   if s != current}
-                out["exported_api_football"] = detail.export_af(dconn, finished_before=af_current)
+                                   for lg, s in dconn.execute("SELECT DISTINCT league, season FROM detail_matches")}
+                out["exported_api_football"] = detail.export_af(dconn, finished_before=af_current + 1)
             dconn.close()
             print(json.dumps(out, indent=1, default=str))
             print("\n".join(notes))

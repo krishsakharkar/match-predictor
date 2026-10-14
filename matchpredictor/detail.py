@@ -1,10 +1,10 @@
 """Per-match detail: who played, their match stats, and every shot. Kept in its own SQLite file
 (data/detail.db, gitignored) so the committed data/match.db stays small.
 
-Durable copy: one gzipped CSV pair per finished league-season in data/history/understat/
-(<LEAGUE>_<season>.players.csv.gz / .shots.csv.gz). Finished seasons never change, so they are
-committed once; `load_archive` rebuilds detail.db from them in seconds, and only the current season
-is downloaded again.
+Durable copy: gzipped CSVs per league-season in data/history/understat/ and per season in
+data/history/api_football/. Finished seasons never change (same bytes on every export, so git stores them
+once); the current season is re-exported on every backfill run. `load_archive` / `load_af` rebuild detail.db
+in seconds, and only new matches are downloaded again.
 """
 from __future__ import annotations
 
@@ -126,12 +126,13 @@ def _insert(dconn, meta: dict, players: list[dict], shots: list[dict]) -> None:
 def sync_understat(conn, dconn, seasons: list[str], notes: list[str], pause: float = 1.0,
                    limit: int | None = None) -> dict:
     """Fetch rosters + shots for every finished match with an Understat id in `seasons` that detail.db
-    does not have yet. Resumable: raw responses are cached, so an interrupted run loses nothing."""
+    does not have yet, newest first (the current season matters most). Resumable: raw responses are cached,
+    so an interrupted run loses nothing."""
     have = {r[0] for r in dconn.execute("SELECT match_id FROM detail_matches")}
     ph = ",".join("?" * len(seasons))
     todo = [r for r in conn.execute(
         f"SELECT id, league, season, date, home, away, understat_id FROM matches WHERE status='FT' "
-        f"AND understat_id IS NOT NULL AND season IN ({ph}) ORDER BY date", seasons) if r["id"] not in have]
+        f"AND understat_id IS NOT NULL AND season IN ({ph}) ORDER BY date DESC", seasons) if r["id"] not in have]
     out = {"todo": len(todo), "stored": 0, "downloaded": 0, "failed": 0}
     for r in todo[:limit] if limit else todo:
         try:
@@ -232,8 +233,8 @@ def _write_gz(path: Path, cols: list[str], rows) -> int:
 
 
 def export_af(dconn, finished_before: int, out_dir: Path | None = None) -> dict:
-    """Archive API-Football tables: seasons < finished_before (finished, immutable) one file per season,
-    plus the season-less tables. Sorted by primary key and written with mtime=0, so unchanged data gives
+    """Archive API-Football tables: every season < finished_before one file per season (the CLI passes the
+    current season + 1, so this season is stored too), plus the season-less tables. Sorted by primary key and written with mtime=0, so unchanged data gives
     unchanged files."""
     out_dir = Path(out_dir or AF_ARCHIVE_DIR)
     out_dir.mkdir(parents=True, exist_ok=True)

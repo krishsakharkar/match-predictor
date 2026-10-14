@@ -5,7 +5,7 @@ Three SQLite files, each with one job:
 | File | In git? | What it is |
 |---|---|---|
 | `data/match.db` | yes | The live pipeline's database: results, fixtures, predictions, tracking. Small. |
-| `data/detail.db` | no (Actions cache) | Raw per-match detail exactly as the sources give it: Understat players/shots, API-Football `af_*` tables. Rebuilt from `data/history/{understat,api_football}/*.csv.gz` with `python -m matchpredictor detail --load`. |
+| `data/detail.db` | no (Actions cache) | Raw per-match detail exactly as the sources give it: Understat players/shots, API-Football `af_*` tables. Rebuilt from `data/history/{understat,api_football}/*.csv.gz` with `python -m matchpredictor detail --load`. Every season is archived, the current one included (re-written on each backfill run). |
 | `data/warehouse.db` | no | **The clean copy to analyse and model from.** Rebuilt from the two above with `python -m matchpredictor warehouse` (seconds to minutes). Never edit it by hand: fix the source or the build. |
 
 ## Conventions (warehouse)
