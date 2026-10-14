@@ -133,7 +133,7 @@ def sync_understat(conn, dconn, seasons: list[str], notes: list[str], pause: flo
     todo = [r for r in conn.execute(
         f"SELECT id, league, season, date, home, away, understat_id FROM matches WHERE status='FT' "
         f"AND understat_id IS NOT NULL AND season IN ({ph}) ORDER BY date DESC", seasons) if r["id"] not in have]
-    out = {"todo": len(todo), "stored": 0, "downloaded": 0, "failed": 0}
+    out = {"todo": len(todo), "stored": 0, "downloaded": 0, "failed": 0, "empty": 0}
     for r in todo[:limit] if limit else todo:
         try:
             payload, downloaded = understat.fetch_match(r["understat_id"], pause=pause)
@@ -146,6 +146,10 @@ def sync_understat(conn, dconn, seasons: list[str], notes: list[str], pause: flo
                 break
             continue
         players, shots = understat.match_rows(payload, r["id"], r["home"], r["away"])
+        if not players:          # Understat lists the match but has no rosters/shots (e.g. 27930): retried next run
+            out["empty"] += 1
+            notes.append(f"Understat has no player data for {r['id']} (understat id {r['understat_id']})")
+            continue
         _insert(dconn, {"match_id": r["id"], "league": r["league"], "season": r["season"], "date": r["date"],
                         "home": r["home"], "away": r["away"], "source": "understat",
                         "source_id": str(r["understat_id"]),

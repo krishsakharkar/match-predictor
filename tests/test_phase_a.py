@@ -478,6 +478,19 @@ def test_understat_match_rows():
     assert shots[0]["team"] == "A" and shots[0]["result"] == "Goal" and shots[0]["assisted_by"] == "Sub One"
 
 
+def test_understat_match_without_data_is_skipped(tmp_path, monkeypatch):
+    from matchpredictor import detail
+    monkeypatch.setattr(understat, "MATCH_DIR", tmp_path)
+    (tmp_path / "27930.json").write_text(json.dumps({"rosters": {"h": [], "a": []}, "shots": {"h": [], "a": []}}))
+    main = db.connect(":memory:")
+    db.upsert_match(main, {"league": "BUNDESLIGA", "season": "2425", "date": "2025-02-09", "home": "Holstein Kiel",
+                           "away": "Bochum", "status": "FT", "fthg": 2, "ftag": 2, "understat_id": "27930",
+                           "source": "understat"})
+    notes = []
+    out = detail.sync_understat(main, detail.connect(tmp_path / "d.db"), ["2425"], notes, pause=0)
+    assert out["empty"] == 1 and out["stored"] == 0 and "27930" in notes[0]
+
+
 def test_detail_archive_round_trip(tmp_path, monkeypatch):
     from matchpredictor import detail
     monkeypatch.setattr(understat, "MATCH_DIR", tmp_path / "cache")
@@ -488,7 +501,7 @@ def test_detail_archive_round_trip(tmp_path, monkeypatch):
                            "status": "FT", "fthg": 1, "ftag": 0, "understat_id": "99", "source": "understat"})
     d1 = detail.connect(tmp_path / "d1.db")
     out = detail.sync_understat(main, d1, ["2526"], [], pause=0)
-    assert out == {"todo": 1, "stored": 1, "downloaded": 0, "failed": 0}       # served from cache
+    assert out == {"todo": 1, "stored": 1, "downloaded": 0, "failed": 0, "empty": 0}       # served from cache
     assert detail.sync_understat(main, d1, ["2526"], [], pause=0)["todo"] == 0  # nothing left to do
     counts = detail.export_archive(d1, "EPL", "2526", tmp_path / "arch")
     assert counts == {"matches": 1, "players": 3, "shots": 1}

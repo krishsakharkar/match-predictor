@@ -208,7 +208,8 @@ def match_rows(payload: dict, match_id: str, home: str, away: str) -> tuple[list
     team = {"h": home, "a": away}
     players, shots = [], []
     for side in ("h", "a"):
-        for p in payload["rosters"][side].values():
+        roster = payload["rosters"].get(side) or {}          # [] when Understat has no data for the match
+        for p in (roster.values() if isinstance(roster, dict) else roster):
             players.append({
                 "match_id": match_id, "team": team[side], "side": side, "player_id": int(p["player_id"]),
                 "player": html.unescape(p["player"]), "position": p.get("position"), "started": int(p.get("position") != "Sub"),
