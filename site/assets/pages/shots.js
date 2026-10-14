@@ -7,7 +7,7 @@
     card(m) {
       const st = (m.prediction && m.prediction.stats) || {};
       const s = st.shots, t = st.sot;
-      if (!s && !t) return MP.cardFrame(m, "", `<div class="muted small" style="margin-top:8px">No shots model for this fixture.</div>`, "");
+      if (!s && !t) return MP.cardFrame(m, "", `<div class="muted small line">No shots model for this fixture.</div>`, "");
       const a = m.actual_stats || {};
       const summary = `<div class="statline"><span>${esc(m.home)} <b>${num(s && s.home)}</b> shots · <b>${num(t && t.home)}</b> on target</span></div>
         <div class="statline"><span>${esc(m.away)} <b>${num(s && s.away)}</b> shots · <b>${num(t && t.away)}</b> on target</span></div>
