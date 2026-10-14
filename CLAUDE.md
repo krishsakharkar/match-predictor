@@ -29,6 +29,7 @@ python -m matchpredictor netcheck            # which data hosts are reachable fr
 python -m matchpredictor run --mode daily    # or prekickoff | auto (auto = ask the gate)
 python -m matchpredictor history [--backtest-data]   # football-data, Understat, ClubElo (+API-Football history)
 python -m matchpredictor backtest --refresh  # walk-forward ablation → site/data/backtest.json (+ markdown)
+python -m matchpredictor detail --load --download --export   # Understat players/shots -> detail.db + archives
 python -m matchpredictor site                # rebuild site JSON from DB
 python -m http.server -d site 8000           # preview
 ```
@@ -64,6 +65,9 @@ matchpredictor/
                       for historical calls, 6.5 s pacing + one retry (free plan: 10/min, 100/day)
     odds_api.py       /events (free fixtures for every competition), /scores (results)
     openfootball.py   Football.TXT parser (90-minute scores, CET kickoffs) used to build European seed CSVs
+    api_football_history.py  bulk history for the team list (data/teams_<season>.json): ids, competitions +
+                      coverage, all fixtures, match detail x20/request (team stats incl. xG, lineups, player
+                      match stats, events), injuries, squads + season stats, transfers -> detail.db af_* tables
   models/
     dixon_coles.py    DC fit; Poisson targets may be a goals/xG blend, tau uses real scores
     elo.py            Elo→goals (per-competition HFA), geometric blend, DC→Elo map, rest feature, 1-D fits
@@ -71,6 +75,9 @@ matchpredictor/
     markets.py        score matrix → 1X2, scorelines (top 3), totals, BTTS
   predict.py       Predictor.components() (raw sources) + combine() (blend + factors) → payload
   absences.py      injuries/suspensions/lineups → per-team effects (fresh-absence rule)
+  detail.py        data/detail.db (gitignored, kept in the Actions cache): Understat player_matches + shots and
+                   API-Football af_* tables; finished seasons archived as deterministic csv.gz in
+                   data/history/understat/ and data/history/api_football/ (`detail --load` rebuilds in seconds)
   backtest_markets.py  walk-forward accuracy of corners/cards/shots/SOT main lines vs a baseline
   match_markets.py corners/cards/shots/players blocks for a prediction payload
   backtest.py      collect → tune (2024-25) → ablation on 2025-26 → bookmaker benchmark → UCL section;
@@ -105,7 +112,8 @@ site/  index.html (all pages as tabs), results/corners/cards/shots/players.html 
 - League match id = `league:season:home:away` (pairing happens once per season → sources merge even
   if rescheduled). Cup/European ids include the date (two legs, league phase + knockouts).
 - Team names are football-data names; map others in `team_aliases.json`. Unmatched names are skipped
-  (never stored under a new name) and reported as a data note.
+  (never stored under a new name) and reported as a data note. A club plays one UEFA competition per
+  season: a fuzzy match onto a club already in another one keeps the provider's name (`pipeline._europe_name`).
 - Predictions are only made for future kickoffs; the stored payload is the last pre-kickoff one.
 - Backtests must only use data before each match week (`fit_league(as_of=...)`, Elo params fitted on
   seasons before the evaluated one, absences use the previous season's player shares).
@@ -113,8 +121,10 @@ site/  index.html (all pages as tabs), results/corners/cards/shots/players.html 
   pre-match rating and interval starts give every club's match dates in all competitions (rest days).
 
 ### Free-tier realities
-- API-Football free plan: seasons 2022-2024 only, 100 req/day, 10 req/min. Current-season injuries,
-  lineups, referees and penalties need Pro; the client turns itself off on the first plan error.
+- API-Football: PRO plan since 2026-10-14 (7,500 req/day, all seasons/endpoints; `netcheck` prints plan and
+  quota). The full history runs in Actions: `workflow_dispatch` mode `backfill` on main (commits archives),
+  `afsample` to check parsing on ~10 requests. The sandbox cannot use the key (proxy drops the header).
+  The client turns itself off for the run on the first plan/quota error.
 - Odds API: fixtures via `/events` are free; `/scores` costs 2 credits per competition-day, only called
   when a shown match finished in the last 3 days. Odds polling is off (`odds_api.fetch_odds=false`).
 - ClubElo is a free hobby service: history refreshed at most monthly, 0.3 s pause, disk-cached.
@@ -126,7 +136,8 @@ site/  index.html (all pages as tabs), results/corners/cards/shots/players.html 
   `rolling_tune` (last 365 days, walk-forward) may override them via `model_params.tuned` only when it
   beats the configuration in use by > KEEP_THRESHOLD — every attempt is logged in `tuning_log`.
 - Seed history in `data/history/*.csv` is loaded on every refresh (source `seed`); add files there for
-  competitions with no live historical source.
+  competitions with no live historical source (UCL 2021-26, UEL/UECL 2021-25 from openfootball: adding the
+  Europa/Conference League cut UCL log loss 0.907 -> 0.888 on 2024-25).
 - Model math changes need tests (`tests/test_model_math.py`, `tests/test_phase_a.py`); pipeline/tracking
   changes → `tests/test_pipeline.py`.
 - Site is plain HTML/CSS/JS (no build step, no external libraries); dark theme, mobile-first.

@@ -97,6 +97,7 @@ class Backfill:
             return {t: have[t] for t in our_teams}
         comps = {c for t in missing for c in our_teams[t]["competitions"]}
         known = set(our_teams)
+        unmapped = []
         for comp in sorted(comps):
             lid = TEAM_LIST_LEAGUES.get(comp)
             if lid is None:
@@ -104,6 +105,8 @@ class Backfill:
             for item in self._call("/teams", {"league": lid, "season": season}).get("response") or []:
                 tm = item["team"]
                 ours = config.canonical_team(tm["name"], known)
+                if ours not in known:
+                    unmapped.append(tm["name"])
                 self.d.execute(
                     "INSERT INTO af_teams (team_id, name, our_name, country, code, founded) VALUES (?,?,?,?,?,?) "
                     "ON CONFLICT(team_id) DO UPDATE SET name=excluded.name, country=excluded.country, "
@@ -115,7 +118,8 @@ class Backfill:
             "SELECT our_name, team_id FROM af_teams WHERE our_name IS NOT NULL")}
         unmatched = [t for t in our_teams if t not in have]
         if unmatched:
-            self.notes.append(f"API-Football: no team id for {unmatched} (map them in config/team_aliases.json)")
+            self.notes.append(f"API-Football: no team id for {unmatched}; unmapped API names in those competitions: "
+                              f"{sorted(set(unmapped))} (add an alias in config/team_aliases.json)")
         return {t: have[t] for t in our_teams if t in have}
 
     # ---------------------------------------------------------------- 2. competitions

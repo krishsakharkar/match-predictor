@@ -86,7 +86,7 @@ jobs:
             python -m matchpredictor detail --load --apifootball --export > out.json
           fi
           cat out.json
-          { echo '```'; cat out.json; echo '```'; du -sh data/history/api_football 2>/dev/null; } >> "$GITHUB_STEP_SUMMARY"
+          { echo '```'; cat out.json; echo '```'; du -sh data/history/api_football 2>/dev/null || true; } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Run pipeline
         if: steps.gate.outputs.mode == 'daily' || steps.gate.outputs.mode == 'prekickoff' || steps.gate.outputs.mode == 'results'
