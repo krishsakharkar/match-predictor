@@ -88,6 +88,9 @@ jobs:
           fi
           cat out.json
           { echo '```'; cat out.json; echo '```'; du -sh data/history/api_football 2>/dev/null || true; } >> "$GITHUB_STEP_SUMMARY"
+          if [ "${{ steps.gate.outputs.mode }}" = "backfill" ]; then
+            { echo; echo "## Data audit"; python -m matchpredictor audit; } | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Run pipeline
         if: steps.gate.outputs.mode == 'daily' || steps.gate.outputs.mode == 'prekickoff' || steps.gate.outputs.mode == 'results'

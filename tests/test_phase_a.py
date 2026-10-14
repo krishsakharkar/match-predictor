@@ -715,3 +715,12 @@ def test_api_football_team_ids_country_checked_and_repaired(tmp_path):
                                  {"team": {"id": 505, "name": "Inter", "country": "Italy"}}]}
     d2 = detail.connect(tmp_path / "d2.db")
     assert afh.Backfill(None, d2, [], client=_Teams()).team_ids({"Inter": teams["Inter"]}, 2026) == {"Inter": 505}
+
+
+def test_audit_runs_on_a_built_warehouse(tmp_path):
+    from matchpredictor import audit, detail, warehouse
+    db.connect(tmp_path / "m.db").close()
+    detail.connect(tmp_path / "d.db").close()
+    warehouse.build(tmp_path / "m.db", tmp_path / "d.db", tmp_path / "w.db")
+    res, md = audit.run(tmp_path / "w.db", tmp_path / "d.db")
+    assert res and "| Check |" in md and all(r["ok"] <= r["total"] or r["total"] == 0 for r in res)
