@@ -692,3 +692,26 @@ def test_extra_league_names_never_fuzzy_matched(conn, monkeypatch):
     teams = {r[0] for r in conn.execute("SELECT home FROM matches WHERE league='GRE' UNION SELECT away FROM matches WHERE league='GRE'")}
     assert teams == {"Aris", "PAOK", "Rangers", "Sporting CP"}          # aliases apply, fuzzy matches don't
     assert db.get_param(conn, "extra_names_version") == football_data.EXTRA_NAMES_VERSION
+
+
+def test_api_football_team_ids_country_checked_and_repaired(tmp_path):
+    from matchpredictor import detail
+    from matchpredictor.ingest import api_football_history as afh
+    d = detail.connect(tmp_path / "d.db")
+    # state left by the first backfill: a UCL qualifier from Andorra linked to Inter, next to the real Inter
+    d.executemany("INSERT INTO af_teams (team_id, name, our_name, country) VALUES (?,?,?,?)",
+                  [(505, "Inter", "Inter", "Italy"), (3342, "Inter Club d'Escaldes", "Inter", "Andorra"),
+                   (560, "Slavia Praha", "Slavia Praha", "Czech-Republic")])
+    teams = {"Inter": {"competitions": ["UCL"], "country": "Italy"},
+             "Slavia Praha": {"competitions": ["UCL"], "country": "Czechia"}}
+    notes = []
+    ids = afh.Backfill(None, d, notes, client=object()).team_ids(teams, 2026)
+    assert ids == {"Inter": 505, "Slavia Praha": 560}                     # Czech-Republic == Czechia
+    assert any("Escaldes" in n for n in notes)
+
+    class _Teams:            # a fresh lookup: the Andorran club must not be taken for Inter
+        def fetch(self, path, params):
+            return {"response": [{"team": {"id": 3342, "name": "Inter Club d'Escaldes", "country": "Andorra"}},
+                                 {"team": {"id": 505, "name": "Inter", "country": "Italy"}}]}
+    d2 = detail.connect(tmp_path / "d2.db")
+    assert afh.Backfill(None, d2, [], client=_Teams()).team_ids({"Inter": teams["Inter"]}, 2026) == {"Inter": 505}
