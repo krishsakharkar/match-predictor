@@ -25,6 +25,7 @@ from .predict import ALL_FACTORS, Predictor, combine, fit_league, load_matches
 
 log = logging.getLogger(__name__)
 KEEP_THRESHOLD = 0.001          # minimum log-loss improvement for a factor to stay in the model
+MIN_EUROPE_SEASON = 100        # finished UCL games for a season to be backtested / used for calibration
 FRESH_GRID = (0, 1, 3, 6)       # injuries: ignore absences older than k straight matches (0 = count all)
 
 
@@ -344,7 +345,9 @@ def run(conn, season: str | None = None, notes: list[str] | None = None, refit_d
                      if k not in ("close_h", "close_d", "close_a", "p_over25", "p_btts")} for r in sel_rows],
     }
     # Champions League
-    ucl_seasons = sorted(set(df[(df.league == "UCL") & (df.status == "FT")].season))
+    counts = df[(df.league == "UCL") & (df.status == "FT")].season.value_counts()
+    # evaluate a season with a real sample: a just-started live season (a handful of games) says nothing
+    ucl_seasons = sorted(s for s, n in counts.items() if n >= MIN_EUROPE_SEASON) or sorted(counts.index)
     if ucl_seasons:
         us = season if season in ucl_seasons else ucl_seasons[-1]
         ep = elo_params_before(us)
