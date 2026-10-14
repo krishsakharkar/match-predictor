@@ -375,3 +375,23 @@ def test_sync_results_adds_finished_games_never_seen(conn, monkeypatch):
     rows = {(r["home"], r["away"]): (r["status"], r["fthg"], r["ftag"]) for r in conn.execute("SELECT * FROM matches")}
     assert rows[("Arsenal", "Lille")] == ("FT", 3, 0)
     assert rows[("Lens", "Sporting CP")] == ("FT", 0, 2)          # stored under canonical names
+
+
+def test_sync_fixtures_one_european_competition_per_club(conn, monkeypatch):
+    from matchpredictor import pipeline
+    from matchpredictor.ingest import odds_api as oa
+    db.upsert_match(conn, {"league": "SERIEA", "season": "2627", "date": "2026-10-10", "home": "Inter",
+                           "away": "Parma", "status": "FT", "fthg": 2, "ftag": 0, "source": "football-data"})
+    db.upsert_match(conn, {"league": "UCL", "season": "2627", "date": "2026-10-13", "home": "Inter",
+                           "away": "Club Brugge KV", "status": "FT", "fthg": 3, "ftag": 4, "source": "odds-api"})
+    # an earlier run stored a Conference League event under the wrong club
+    db.upsert_match(conn, {"league": "UECL", "season": "2627", "date": "2026-10-15", "home": "Mjällby AIF",
+                           "away": "Inter", "kickoff_utc": "2026-10-15T16:45:00Z", "odds_api_id": "ev9",
+                           "status": "SCHEDULED", "source": "odds-api"})
+    monkeypatch.setattr(oa, "events", lambda conn, sport: [{"id": "ev9", "commence_time": "2026-10-15T16:45:00Z",
+                                                             "home_team": "Mjällby AIF", "away_team": "Inter Turku"}]
+                        if sport == "soccer_uefa_europa_conference_league" else [])
+    notes = []
+    pipeline.sync_fixtures(conn, notes)
+    assert conn.execute("SELECT COUNT(*) FROM matches WHERE league='UECL'").fetchone()[0] == 0
+    assert any("Inter Turku" in n for n in notes)

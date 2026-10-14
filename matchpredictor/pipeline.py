@@ -39,11 +39,19 @@ def sync_fixtures(conn, notes: list[str]) -> int:
             notes.append(f"Fixtures unavailable for {c['name']}: {e}")
             continue
         for e in evs:
+            ko = e["commence_time"]
             home = config.canonical_team(e["home_team"], known)
             away = config.canonical_team(e["away_team"], known)
+            if c["type"] == "europe":
+                home, away = (_europe_name(conn, key, config.season_code(ko), raw, name, notes)
+                              for raw, name in ((e["home_team"], home), (e["away_team"], away)))
             if not config.is_displayed(key, home, away):
+                # an event we stored earlier under a wrong name mapping must not linger on the site
+                for (sid,) in conn.execute("SELECT id FROM matches WHERE odds_api_id=? AND status='SCHEDULED'",
+                                           (e["id"],)).fetchall():
+                    conn.execute("DELETE FROM predictions WHERE match_id=?", (sid,))
+                    conn.execute("DELETE FROM matches WHERE id=?", (sid,))
                 continue
-            ko = e["commence_time"]
             mid = db.upsert_match(conn, {"league": key, "season": config.season_code(ko), "date": ko[:10],
                                          "kickoff_utc": ko, "home": home, "away": away, "odds_api_id": e["id"],
                                          "source": "odds-api"})
@@ -67,6 +75,22 @@ def sync_fixtures(conn, notes: list[str]) -> int:
             notes.append(f"{c['name']}: fixture team names not matched to results data: {sorted(odd - fd)} "
                          "(add to config/team_aliases.json)")
     return n
+
+
+def _europe_name(conn, comp: str, season: str, raw: str, name: str, notes: list[str]) -> str:
+    """A club plays in one UEFA competition per season. A fuzzy name match (not exact, not an alias) onto a
+    club already playing another European competition this season is a different club - e.g. a Conference
+    League "Inter ..." merged into Inter - so keep the provider's own name for it."""
+    if name == raw or raw in config._aliases():
+        return name
+    others = [k for k, v in config.competitions().items() if v["type"] == "europe" and k != comp]
+    ph = ",".join("?" * len(others))
+    clash = conn.execute(f"SELECT league FROM matches WHERE season=? AND league IN ({ph}) AND (home=? OR away=?) "
+                         "LIMIT 1", (season, *others, name, name)).fetchone()
+    if not clash:
+        return name
+    notes.append(f"{comp}: '{raw}' is not {name} ({name} plays in {clash[0]} this season) - kept as '{raw}'")
+    return raw
 
 
 def sync_referees_fd(conn) -> None:

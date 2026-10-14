@@ -67,9 +67,17 @@
   },
   "api_football": {
     "cache_ttl_hours": 24,
-    "daily_limit": 100,
-    "reserve_requests": 10,
-    "min_interval_seconds": 6.5
+    "daily_limit": 7500,
+    "reserve_requests": 300,
+    "min_interval_seconds": 0.25,
+    "_comment": "PRO plan: 7,500 requests/day, 300/minute (pacing 0.25 s)",
+    "history": {
+      "first_season": 2021,
+      "batch_size": 20,
+      "exclude_league_words": [
+        "friendl"
+      ]
+    }
   },
   "schedule": {
     "daily_hour_et": 9,

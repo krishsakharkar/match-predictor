@@ -9,6 +9,7 @@ finished seasons are never re-downloaded.
 from __future__ import annotations
 
 import codecs
+import html
 import json
 import logging
 import re
@@ -150,3 +151,79 @@ def update(conn, current_season: str, notes: list[str]) -> dict:
                              "(add to config/team_aliases.json)")
             out[f"{key}:{s}"] = res["matches"]
     return out
+
+
+# ---------------------------------------------------------------- per-match detail (players, shots)
+
+MATCH_DIR = CACHE_DIR / "matches"
+
+
+def parse_match(text: str) -> dict:
+    """{"rosters": {"h": {...}, "a": {...}}, "shots": {"h": [...], "a": [...]}} from /getMatchData/{id}
+    (or the HTML match page's rostersData / shotsData blobs). The HTML roster template is dropped."""
+    text = text.strip()
+    if text.startswith("{"):
+        d = json.loads(text)
+        rosters, shots = d.get("rosters"), d.get("shots")
+    else:
+        rosters, shots = _blob(text, "rostersData"), _blob(text, "shotsData")
+    if not rosters or not isinstance(rosters, dict) or not {"h", "a"} <= set(rosters):
+        raise UnderstatUnavailable("unrecognised Understat match format")
+    return {"rosters": rosters, "shots": shots or {"h": [], "a": []}}
+
+
+def fetch_match(understat_id: str | int, pause: float = 1.0) -> tuple[dict, bool]:
+    """One finished match's rosters and shots, from cache when present (finished matches never change).
+    Returns (payload, downloaded); sleeps `pause` seconds after a download to stay polite."""
+    path = MATCH_DIR / f"{understat_id}.json"
+    if path.exists():
+        return json.loads(path.read_text()), False
+    last = None
+    for url, hdr in ((f"{BASE}/getMatchData/{understat_id}", {"X-Requested-With": "XMLHttpRequest"}),
+                     (f"{BASE}/match/{understat_id}", {})):
+        try:
+            r = requests.get(url, headers={**HEADERS, **hdr}, timeout=30)
+        except requests.RequestException as e:
+            last = type(e).__name__
+            continue
+        if r.status_code != 200:
+            last = f"HTTP {r.status_code}"
+            continue
+        try:
+            payload = parse_match(r.text)
+        except (UnderstatUnavailable, ValueError) as e:
+            last = str(e)
+            continue
+        MATCH_DIR.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(payload, separators=(",", ":")))
+        time.sleep(pause)
+        return payload, True
+    time.sleep(pause)
+    raise UnderstatUnavailable(f"understat.com match {understat_id}: {last}")
+
+
+def match_rows(payload: dict, match_id: str, home: str, away: str) -> tuple[list[dict], list[dict]]:
+    """Flatten one match into player rows and shot rows, keyed by our match id and team names
+    (the side h/a decides the team, so no name matching is needed)."""
+    team = {"h": home, "a": away}
+    players, shots = [], []
+    for side in ("h", "a"):
+        for p in payload["rosters"][side].values():
+            players.append({
+                "match_id": match_id, "team": team[side], "side": side, "player_id": int(p["player_id"]),
+                "player": html.unescape(p["player"]), "position": p.get("position"), "started": int(p.get("position") != "Sub"),
+                "minutes": int(p.get("time") or 0), "goals": int(p.get("goals") or 0),
+                "own_goals": int(p.get("own_goals") or 0), "assists": int(p.get("assists") or 0),
+                "shots": int(p.get("shots") or 0), "key_passes": int(p.get("key_passes") or 0),
+                "xg": _f(p.get("xG")), "xa": _f(p.get("xA")), "xg_chain": _f(p.get("xGChain")),
+                "xg_buildup": _f(p.get("xGBuildup")), "yellow": int(p.get("yellow_card") or 0),
+                "red": int(p.get("red_card") or 0)})
+        for s in payload["shots"].get(side) or []:
+            shots.append({
+                "match_id": match_id, "team": team[side], "shot_id": int(s["id"]), "minute": int(s.get("minute") or 0),
+                "player_id": int(s["player_id"]), "player": html.unescape(s.get("player") or ""), "result": s.get("result"),
+                "x": _f(s.get("X")), "y": _f(s.get("Y")), "xg": _f(s.get("xG")), "situation": s.get("situation"),
+                "shot_type": s.get("shotType"),
+                "assisted_by": html.unescape(s["player_assisted"]) if s.get("player_assisted") else None,
+                "last_action": s.get("lastAction")})
+    return players, shots

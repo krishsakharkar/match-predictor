@@ -449,7 +449,146 @@ def test_openfootball_parse_ninety_minute_scores_and_dates():
 def test_seed_names_are_canonical():
     import csv
     aliases = json.loads((config.CONFIG_DIR / "team_aliases.json").read_text())
-    for path in sorted(config.ROOT.joinpath("data", "history").glob("ucl_results*.csv")):
+    for path in sorted(config.ROOT.joinpath("data", "history").glob("*_results*.csv")):
         for r in csv.DictReader(open(path, encoding="utf-8")):
             for t in (r["home"], r["away"]):
                 assert aliases.get(t, t) == t, (path.name, t)
+
+
+def _understat_match_payload():
+    p = lambda i, name, pos, t, **k: {"id": str(i), "player_id": str(i), "player": name, "position": pos, "time": str(t),
+                                      "goals": "0", "own_goals": "0", "assists": "0", "shots": "0", "key_passes": "0",
+                                      "xG": "0", "xA": "0", "xGChain": "0", "xGBuildup": "0", "yellow_card": "0",
+                                      "red_card": "0", **k}
+    return {"rosters": {"h": {"1": p(1, "Vital N&#039;Simba", "DL", 90, goals="1", shots="2", xG="0.7"),
+                              "2": p(2, "Sub One", "Sub", 20, yellow_card="1")},
+                        "a": {"3": p(3, "Keeper", "GK", 90)}},
+            "shots": {"h": [{"id": "10", "minute": "33", "player_id": "1", "player": "Vital N&#039;Simba",
+                             "result": "Goal", "X": "0.9", "Y": "0.5", "xG": "0.6", "situation": "OpenPlay",
+                             "shotType": "Head", "player_assisted": "Sub One", "lastAction": "Cross"}], "a": []}}
+
+
+def test_understat_match_rows():
+    players, shots = understat.match_rows(understat.parse_match(json.dumps(_understat_match_payload())),
+                                          "EPL:2526:A:B", "A", "B")
+    by = {p["player_id"]: p for p in players}
+    assert by[1]["team"] == "A" and by[1]["player"] == "Vital N'Simba" and by[1]["started"] == 1
+    assert by[1]["goals"] == 1 and by[1]["xg"] == 0.7
+    assert by[2]["started"] == 0 and by[2]["yellow"] == 1 and by[3]["team"] == "B"
+    assert shots[0]["team"] == "A" and shots[0]["result"] == "Goal" and shots[0]["assisted_by"] == "Sub One"
+
+
+def test_detail_archive_round_trip(tmp_path, monkeypatch):
+    from matchpredictor import detail
+    monkeypatch.setattr(understat, "MATCH_DIR", tmp_path / "cache")
+    (tmp_path / "cache").mkdir()
+    (tmp_path / "cache" / "99.json").write_text(json.dumps(_understat_match_payload()))
+    main = db.connect(":memory:")
+    db.upsert_match(main, {"league": "EPL", "season": "2526", "date": "2025-09-01", "home": "A", "away": "B",
+                           "status": "FT", "fthg": 1, "ftag": 0, "understat_id": "99", "source": "understat"})
+    d1 = detail.connect(tmp_path / "d1.db")
+    out = detail.sync_understat(main, d1, ["2526"], [], pause=0)
+    assert out == {"todo": 1, "stored": 1, "downloaded": 0, "failed": 0}       # served from cache
+    assert detail.sync_understat(main, d1, ["2526"], [], pause=0)["todo"] == 0  # nothing left to do
+    counts = detail.export_archive(d1, "EPL", "2526", tmp_path / "arch")
+    assert counts == {"matches": 1, "players": 3, "shots": 1}
+    first = (tmp_path / "arch" / "EPL_2526.players.csv.gz").read_bytes()
+    detail.export_archive(d1, "EPL", "2526", tmp_path / "arch")
+    assert (tmp_path / "arch" / "EPL_2526.players.csv.gz").read_bytes() == first   # deterministic bytes
+    d2 = detail.connect(tmp_path / "d2.db")
+    assert detail.load_archive(d2, tmp_path / "arch") == {"EPL_2526": 1}
+    row = d2.execute("SELECT player, goals, xg, started FROM player_matches WHERE player_id=1").fetchone()
+    assert tuple(row) == ("Vital N'Simba", 1, 0.7, 1)
+    assert d2.execute("SELECT COUNT(*) FROM shots").fetchone()[0] == 1
+
+
+class _FakeAF:
+    """Canned API-Football responses for the bulk history test."""
+    def __init__(self):
+        self.calls = []
+
+    def fetch(self, path, params):
+        self.calls.append((path, dict(params)))
+        cov = {"fixtures": {"events": True, "lineups": True, "statistics_fixtures": True, "statistics_players": True},
+               "injuries": True, "players": True}
+        fx = lambda fid, season: {
+            "fixture": {"id": fid, "date": f"{season}-09-01T15:00:00+00:00", "referee": "M. Oliver",
+                        "venue": {"name": "Emirates"}, "status": {"short": "FT"}},
+            "league": {"id": 39, "season": season, "round": "Regular Season - 3"},
+            "teams": {"home": {"id": 42, "name": "Arsenal"}, "away": {"id": 50, "name": "Manchester City"}},
+            "goals": {"home": 2, "away": 1}, "score": {"halftime": {"home": 1, "away": 0}}}
+        if path == "/teams":
+            return {"response": [{"team": {"id": 42, "name": "Arsenal", "country": "England"}},
+                                 {"team": {"id": 50, "name": "Manchester City", "country": "England"}}]}
+        if path == "/leagues":
+            return {"response": [{"league": {"id": 39, "name": "Premier League", "type": "League"},
+                                  "country": {"name": "England"}, "seasons": [{"year": params["season"], "coverage": cov}]},
+                                 {"league": {"id": 667, "name": "Friendlies Clubs", "type": "Cup"}, "seasons": []}]}
+        if path == "/fixtures" and "ids" in params:
+            out = []
+            for fid in map(int, params["ids"].split("-")):
+                f = fx(fid, 2025 if fid < 2000 else 2026)
+                f["statistics"] = [{"team": {"id": 42}, "statistics": [{"type": "Corner Kicks", "value": 7},
+                                                                      {"type": "expected_goals", "value": "1.85"}]}]
+                f["lineups"] = [{"team": {"id": 42}, "formation": "4-3-3", "coach": {"id": 1, "name": "M. Arteta"},
+                                 "startXI": [{"player": {"id": 7, "name": "B. Saka", "number": 7, "pos": "F", "grid": "4:3"}}],
+                                 "substitutes": [{"player": {"id": 19, "name": "L. Trossard", "number": 19, "pos": "F"}}]}]
+                f["players"] = [{"team": {"id": 42}, "players": [{"player": {"id": 7, "name": "B. Saka"}, "statistics": [{
+                    "games": {"minutes": 90, "number": 7, "position": "F", "rating": "8.1", "captain": False,
+                              "substitute": False}, "shots": {"total": 4, "on": 2}, "goals": {"total": 1, "assists": 1},
+                    "passes": {"total": 40, "key": 3, "accuracy": "31"}, "cards": {"yellow": 1, "red": 0},
+                    "penalty": {"commited": None, "scored": 0}}]}]}]
+                f["events"] = [{"time": {"elapsed": 23}, "team": {"id": 42}, "player": {"id": 7, "name": "B. Saka"},
+                                "assist": {"id": 19, "name": "L. Trossard"}, "type": "Goal", "detail": "Normal Goal"}]
+                out.append(f)
+            return {"response": out}
+        if path == "/fixtures":
+            return {"response": [fx(1001 if params["season"] == 2025 else 2001, params["season"])]}
+        if path == "/injuries":
+            page = params.get("page", 1)
+            return {"paging": {"current": page, "total": 2}, "response": [
+                {"player": {"id": 100 + page, "name": f"P{page}", "type": "Missing Fixture", "reason": "Knee Injury"},
+                 "team": {"id": 42}, "fixture": {"id": 1001 if params["season"] == 2025 else 2001,
+                                                 "date": f"{params['season']}-09-01"}}]}
+        if path == "/players":
+            return {"paging": {"current": 1, "total": 1}, "response": [
+                {"player": {"id": 7, "name": "B. Saka", "birth": {"date": "2001-09-05"}, "nationality": "England"},
+                 "statistics": [{"team": {"id": params["team"]}, "league": {"id": 39},
+                                 "games": {"appearences": 30, "lineups": 28, "minutes": 2500, "position": "Attacker",
+                                           "rating": "7.4"}, "goals": {"total": 12, "assists": 9}}]}]}
+        if path == "/transfers":
+            return {"response": [{"player": {"id": 7, "name": "B. Saka"}, "transfers": [
+                {"date": "2018-07-01", "type": "N/A", "teams": {"in": {"id": 42, "name": "Arsenal"},
+                                                                "out": {"id": 9, "name": "Arsenal U18"}}}]}]}
+        raise AssertionError(path)
+
+
+def test_api_football_history_backfill_resume_and_archive(tmp_path):
+    from matchpredictor import detail
+    from matchpredictor.ingest import api_football_history as afh
+    teams = {"Arsenal": {"competitions": ["EPL"]}, "Man City": {"competitions": ["EPL"]}}
+    d1 = detail.connect(tmp_path / "d1.db")
+    fake = _FakeAF()
+    out = afh.Backfill(None, d1, [], client=fake).run(teams, current=2026, first=2025)
+    assert out["complete"] and out["teams"] == 2 and out["detail"] == 2
+    assert {r[0] for r in d1.execute("SELECT our_name FROM af_teams WHERE our_name IS NOT NULL")} == {"Arsenal", "Man City"}
+    assert d1.execute("SELECT COUNT(*) FROM af_competitions WHERE name LIKE 'Friendl%'").fetchone()[0] == 0
+    pm = d1.execute("SELECT minutes, rating, shots, goals, assists, yellow FROM af_player_match WHERE fixture_id=1001").fetchone()
+    assert tuple(pm) == (90, 8.1, 4, 1, 1, 1)
+    assert d1.execute("SELECT value FROM af_team_stats WHERE fixture_id=1001 AND stat='expected_goals'").fetchone()[0] == "1.85"
+    assert d1.execute("SELECT COUNT(*) FROM af_injuries WHERE season=2025").fetchone()[0] == 2        # both pages
+    assert d1.execute("SELECT started FROM af_lineups WHERE player_id=19").fetchone()[0] == 0
+    assert d1.execute("SELECT type, minute FROM af_events").fetchone()[:] == ("Goal", 23)
+    # a second run fetches only the current season again
+    fake.calls.clear()
+    afh.Backfill(None, d1, [], client=fake).run(teams, current=2026, first=2025)
+    assert all(p.get("season") in (None, 2026) for path, p in fake.calls if path != "/transfers"), fake.calls
+    # archive: finished season only, reload into a fresh db
+    files = detail.export_af(d1, finished_before=2026, out_dir=tmp_path / "af")
+    assert files["af_player_match_2025"] == 1 and "af_player_match_2026" not in files
+    d2 = detail.connect(tmp_path / "d2.db")
+    detail.load_af(d2, tmp_path / "af")
+    assert d2.execute("SELECT rating FROM af_player_match WHERE fixture_id=1001").fetchone()[0] == 8.1
+    fake.calls.clear()
+    afh.Backfill(None, d2, [], client=fake).run(teams, current=2026, first=2025)
+    assert not any(p.get("season") == 2025 for _, p in fake.calls)       # archived season not re-fetched
