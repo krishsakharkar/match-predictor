@@ -5,3 +5,4 @@ __pycache__/
 data/raw/
 *.db-journal
 data/cache/
+data/detail.db

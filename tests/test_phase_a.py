@@ -449,7 +449,54 @@ def test_openfootball_parse_ninety_minute_scores_and_dates():
 def test_seed_names_are_canonical():
     import csv
     aliases = json.loads((config.CONFIG_DIR / "team_aliases.json").read_text())
-    for path in sorted(config.ROOT.joinpath("data", "history").glob("ucl_results*.csv")):
+    for path in sorted(config.ROOT.joinpath("data", "history").glob("*_results*.csv")):
         for r in csv.DictReader(open(path, encoding="utf-8")):
             for t in (r["home"], r["away"]):
                 assert aliases.get(t, t) == t, (path.name, t)
+
+
+def _understat_match_payload():
+    p = lambda i, name, pos, t, **k: {"id": str(i), "player_id": str(i), "player": name, "position": pos, "time": str(t),
+                                      "goals": "0", "own_goals": "0", "assists": "0", "shots": "0", "key_passes": "0",
+                                      "xG": "0", "xA": "0", "xGChain": "0", "xGBuildup": "0", "yellow_card": "0",
+                                      "red_card": "0", **k}
+    return {"rosters": {"h": {"1": p(1, "Vital N&#039;Simba", "DL", 90, goals="1", shots="2", xG="0.7"),
+                              "2": p(2, "Sub One", "Sub", 20, yellow_card="1")},
+                        "a": {"3": p(3, "Keeper", "GK", 90)}},
+            "shots": {"h": [{"id": "10", "minute": "33", "player_id": "1", "player": "Vital N&#039;Simba",
+                             "result": "Goal", "X": "0.9", "Y": "0.5", "xG": "0.6", "situation": "OpenPlay",
+                             "shotType": "Head", "player_assisted": "Sub One", "lastAction": "Cross"}], "a": []}}
+
+
+def test_understat_match_rows():
+    players, shots = understat.match_rows(understat.parse_match(json.dumps(_understat_match_payload())),
+                                          "EPL:2526:A:B", "A", "B")
+    by = {p["player_id"]: p for p in players}
+    assert by[1]["team"] == "A" and by[1]["player"] == "Vital N'Simba" and by[1]["started"] == 1
+    assert by[1]["goals"] == 1 and by[1]["xg"] == 0.7
+    assert by[2]["started"] == 0 and by[2]["yellow"] == 1 and by[3]["team"] == "B"
+    assert shots[0]["team"] == "A" and shots[0]["result"] == "Goal" and shots[0]["assisted_by"] == "Sub One"
+
+
+def test_detail_archive_round_trip(tmp_path, monkeypatch):
+    from matchpredictor import detail
+    monkeypatch.setattr(understat, "MATCH_DIR", tmp_path / "cache")
+    (tmp_path / "cache").mkdir()
+    (tmp_path / "cache" / "99.json").write_text(json.dumps(_understat_match_payload()))
+    main = db.connect(":memory:")
+    db.upsert_match(main, {"league": "EPL", "season": "2526", "date": "2025-09-01", "home": "A", "away": "B",
+                           "status": "FT", "fthg": 1, "ftag": 0, "understat_id": "99", "source": "understat"})
+    d1 = detail.connect(tmp_path / "d1.db")
+    out = detail.sync_understat(main, d1, ["2526"], [], pause=0)
+    assert out == {"todo": 1, "stored": 1, "downloaded": 0, "failed": 0}       # served from cache
+    assert detail.sync_understat(main, d1, ["2526"], [], pause=0)["todo"] == 0  # nothing left to do
+    counts = detail.export_archive(d1, "EPL", "2526", tmp_path / "arch")
+    assert counts == {"matches": 1, "players": 3, "shots": 1}
+    first = (tmp_path / "arch" / "EPL_2526.players.csv.gz").read_bytes()
+    detail.export_archive(d1, "EPL", "2526", tmp_path / "arch")
+    assert (tmp_path / "arch" / "EPL_2526.players.csv.gz").read_bytes() == first   # deterministic bytes
+    d2 = detail.connect(tmp_path / "d2.db")
+    assert detail.load_archive(d2, tmp_path / "arch") == {"EPL_2526": 1}
+    row = d2.execute("SELECT player, goals, xg, started FROM player_matches WHERE player_id=1").fetchone()
+    assert tuple(row) == ("Vital N'Simba", 1, 0.7, 1)
+    assert d2.execute("SELECT COUNT(*) FROM shots").fetchone()[0] == 1
