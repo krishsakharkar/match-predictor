@@ -373,3 +373,35 @@ def test_rolling_tune_needs_enough_matches(conn):
     notes = []
     out = backtest.rolling_tune(conn, notes, today="2026-10-13")
     assert out["adopted"] is False and "skipped" in notes[0]
+
+
+def test_shrink_moves_toward_or_away_from_even():
+    from matchpredictor.predict import shrink
+    lam, mu = 2.4, 0.8
+    l1, m1 = shrink(lam, mu, 0.3)          # toward even
+    assert l1 < lam and m1 > mu and l1 * m1 == pytest.approx(lam * mu)
+    l2, m2 = shrink(lam, mu, -0.3)         # wider gap
+    assert l2 > lam and m2 < mu
+    assert shrink(lam, mu, 0.0) == (lam, mu)
+
+
+def test_combine_applies_cross_league_shrink_by_category():
+    info = dict(INFO, dc=None, joint=(2.0, 1.0), category="top")
+    wide = combine(info, factors=NO, blend_weight=0.5, rest_coef=0, elo_params=PARAMS,
+                   cross_shrink={"top": -0.3})
+    plain = combine(info, factors=NO, blend_weight=0.5, rest_coef=0, elo_params=PARAMS, cross_shrink={})
+    assert plain["lam"] == 2.0 and wide["lam"] > 2.0
+    mixed = combine(dict(info, category="mixed"), factors=NO, blend_weight=0.5, rest_coef=0, elo_params=PARAMS,
+                    cross_shrink={"top": -0.3})
+    assert mixed["lam"] == 2.0
+
+
+def test_extra_leagues_never_displayed_and_parse():
+    from matchpredictor.ingest import football_data
+    assert "POR" in config.extra_leagues() and not config.is_displayed("POR", "Sp Lisbon", "Benfica")
+    text = ("Country,League,Season,Date,Time,Home,Away,HG,AG,Res\n"
+            "Norway,Eliteserien,2025,12/04/2025,17:00,Viking,Bodo/Glimt,2,1,H\n"
+            "Norway,Eliteserien,2019,12/04/2019,17:00,Viking,Molde,0,0,D\n")
+    rows = football_data.parse_new_csv(text, "NOR", since="2021-07-01")
+    assert len(rows) == 1 and rows[0]["fthg"] == 2 and rows[0]["season"] == "2425"
+    assert config.canonical_team("Bodo/Glimt") == "Bodø/Glimt" and config.canonical_team("Sp Lisbon") == "Sporting CP"

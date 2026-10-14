@@ -18,6 +18,7 @@ from .. import config, db
 log = logging.getLogger(__name__)
 
 PRIMARY = "https://www.football-data.co.uk/mmz4281/{season}/{code}.csv"
+NEW_FORMAT = "https://www.football-data.co.uk/new/{code}.csv"     # one file, all seasons (extra leagues)
 FIXTURES = "https://www.football-data.co.uk/fixtures.csv"
 MIRROR = ("https://raw.githubusercontent.com/datasets/football-datasets/main/datasets/"
           "{slug}/season-{season}.csv")
@@ -162,4 +163,55 @@ def fetch_fixtures_csv() -> list[dict]:
             "away": str(r["AwayTeam"]).strip(),
             "referee": str(ref).strip() if isinstance(ref, str) and ref.strip() else None,
         })
+    return out
+
+
+# ---------------------------------------------------------------- results-only extra leagues
+
+def parse_new_csv(text: str, league: str, since: str) -> list[dict]:
+    """football-data 'new' format (Country,League,Season,Date,Time,Home,Away,HG,AG,Res,...)."""
+    df = pd.read_csv(io.StringIO(text), on_bad_lines="skip")
+    out = []
+    for _, r in df.iterrows():
+        d = pd.to_datetime(str(r.get("Date")), dayfirst=True, errors="coerce")
+        if pd.isna(d) or d.strftime("%Y-%m-%d") < since:
+            continue
+        hg, ag = _int(r.get("HG")), _int(r.get("AG"))
+        if hg is None or ag is None:
+            continue
+        out.append({"league": league, "season": config.season_code(d), "date": d.strftime("%Y-%m-%d"),
+                    "home": str(r["Home"]).strip(), "away": str(r["Away"]).strip(), "status": "FT",
+                    "fthg": hg, "ftag": ag, "source": "football-data"})
+    return out
+
+
+def update_extra(conn, current_season: str, notes: list[str]) -> dict:
+    """Results for the extra leagues, with team names mapped onto the names used in European games."""
+    seasons = config.previous_seasons(current_season, config.settings()["history_seasons"]) + [current_season]
+    since = f"20{seasons[0][:2]}-07-01"
+    known = {r[0] for r in conn.execute("SELECT home FROM matches UNION SELECT away FROM matches")}
+    out = {}
+    for key, lg in config.extra_leagues().items():
+        rows = []
+        if lg.get("football_data_new"):
+            text = _get(NEW_FORMAT.format(code=lg["football_data_new"]))
+            if text and "Home" in text:
+                rows = parse_new_csv(text, key, since)
+        else:
+            for s in seasons:
+                if s != current_season and season_complete(conn, key, s):
+                    continue
+                text = _get(PRIMARY.format(season=s, code=lg["football_data_code"]))
+                if text and "HomeTeam" in text:
+                    rows += parse_csv(text, key, s, "football-data")
+        if not rows:
+            notes.append(f"{lg['name']}: results unavailable (football-data.co.uk unreachable?) - its clubs are "
+                         "rated from European games only")
+            continue
+        for r in rows:
+            r["home"] = config.canonical_team(r["home"], known)
+            r["away"] = config.canonical_team(r["away"], known)
+            db.upsert_match(conn, r)
+        out[key] = len(rows)
+    conn.commit()
     return out

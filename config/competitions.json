@@ -147,5 +147,105 @@
     "odds_api_sport": "soccer_france_coupe_de_france",
     "api_football_id": 66,
     "enabled": true
+  },
+  "POR": {
+    "name": "Primeira Liga",
+    "badge": "POR",
+    "type": "extra",
+    "coverage": "none",
+    "country": "POR",
+    "enabled": true,
+    "note": "results only, used to rate clubs from outside the five big leagues in European games",
+    "football_data_code": "P1"
+  },
+  "NED": {
+    "name": "Eredivisie",
+    "badge": "NED",
+    "type": "extra",
+    "coverage": "none",
+    "country": "NED",
+    "enabled": true,
+    "note": "results only, used to rate clubs from outside the five big leagues in European games",
+    "football_data_code": "N1"
+  },
+  "BEL": {
+    "name": "Belgian Pro League",
+    "badge": "BEL",
+    "type": "extra",
+    "coverage": "none",
+    "country": "BEL",
+    "enabled": true,
+    "note": "results only, used to rate clubs from outside the five big leagues in European games",
+    "football_data_code": "B1"
+  },
+  "TUR": {
+    "name": "Süper Lig",
+    "badge": "TUR",
+    "type": "extra",
+    "coverage": "none",
+    "country": "TUR",
+    "enabled": true,
+    "note": "results only, used to rate clubs from outside the five big leagues in European games",
+    "football_data_code": "T1"
+  },
+  "GRE": {
+    "name": "Greek Super League",
+    "badge": "GRE",
+    "type": "extra",
+    "coverage": "none",
+    "country": "GRE",
+    "enabled": true,
+    "note": "results only, used to rate clubs from outside the five big leagues in European games",
+    "football_data_code": "G1"
+  },
+  "SCO": {
+    "name": "Scottish Premiership",
+    "badge": "SCO",
+    "type": "extra",
+    "coverage": "none",
+    "country": "SCO",
+    "enabled": true,
+    "note": "results only, used to rate clubs from outside the five big leagues in European games",
+    "football_data_code": "SC0"
+  },
+  "AUT": {
+    "name": "Austrian Bundesliga",
+    "badge": "AUT",
+    "type": "extra",
+    "coverage": "none",
+    "country": "AUT",
+    "enabled": true,
+    "note": "results only, used to rate clubs from outside the five big leagues in European games",
+    "football_data_new": "AUT"
+  },
+  "NOR": {
+    "name": "Eliteserien",
+    "badge": "NOR",
+    "type": "extra",
+    "coverage": "none",
+    "country": "NOR",
+    "enabled": true,
+    "note": "results only, used to rate clubs from outside the five big leagues in European games",
+    "football_data_new": "NOR"
+  },
+  "SUI": {
+    "name": "Swiss Super League",
+    "badge": "SUI",
+    "type": "extra",
+    "coverage": "none",
+    "country": "SUI",
+    "enabled": true,
+    "note": "results only, used to rate clubs from outside the five big leagues in European games",
+    "football_data_new": "SWZ"
+  },
+  "DEN": {
+    "name": "Danish Superliga",
+    "badge": "DEN",
+    "type": "extra",
+    "coverage": "none",
+    "country": "DEN",
+    "enabled": true,
+    "note": "results only, used to rate clubs from outside the five big leagues in European games",
+    "football_data_new": "DNK"
   }
 }
