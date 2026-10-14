@@ -500,3 +500,95 @@ def test_detail_archive_round_trip(tmp_path, monkeypatch):
     row = d2.execute("SELECT player, goals, xg, started FROM player_matches WHERE player_id=1").fetchone()
     assert tuple(row) == ("Vital N'Simba", 1, 0.7, 1)
     assert d2.execute("SELECT COUNT(*) FROM shots").fetchone()[0] == 1
+
+
+class _FakeAF:
+    """Canned API-Football responses for the bulk history test."""
+    def __init__(self):
+        self.calls = []
+
+    def fetch(self, path, params):
+        self.calls.append((path, dict(params)))
+        cov = {"fixtures": {"events": True, "lineups": True, "statistics_fixtures": True, "statistics_players": True},
+               "injuries": True, "players": True}
+        fx = lambda fid, season: {
+            "fixture": {"id": fid, "date": f"{season}-09-01T15:00:00+00:00", "referee": "M. Oliver",
+                        "venue": {"name": "Emirates"}, "status": {"short": "FT"}},
+            "league": {"id": 39, "season": season, "round": "Regular Season - 3"},
+            "teams": {"home": {"id": 42, "name": "Arsenal"}, "away": {"id": 50, "name": "Manchester City"}},
+            "goals": {"home": 2, "away": 1}, "score": {"halftime": {"home": 1, "away": 0}}}
+        if path == "/teams":
+            return {"response": [{"team": {"id": 42, "name": "Arsenal", "country": "England"}},
+                                 {"team": {"id": 50, "name": "Manchester City", "country": "England"}}]}
+        if path == "/leagues":
+            return {"response": [{"league": {"id": 39, "name": "Premier League", "type": "League"},
+                                  "country": {"name": "England"}, "seasons": [{"year": params["season"], "coverage": cov}]},
+                                 {"league": {"id": 667, "name": "Friendlies Clubs", "type": "Cup"}, "seasons": []}]}
+        if path == "/fixtures" and "ids" in params:
+            out = []
+            for fid in map(int, params["ids"].split("-")):
+                f = fx(fid, 2025 if fid < 2000 else 2026)
+                f["statistics"] = [{"team": {"id": 42}, "statistics": [{"type": "Corner Kicks", "value": 7},
+                                                                      {"type": "expected_goals", "value": "1.85"}]}]
+                f["lineups"] = [{"team": {"id": 42}, "formation": "4-3-3", "coach": {"id": 1, "name": "M. Arteta"},
+                                 "startXI": [{"player": {"id": 7, "name": "B. Saka", "number": 7, "pos": "F", "grid": "4:3"}}],
+                                 "substitutes": [{"player": {"id": 19, "name": "L. Trossard", "number": 19, "pos": "F"}}]}]
+                f["players"] = [{"team": {"id": 42}, "players": [{"player": {"id": 7, "name": "B. Saka"}, "statistics": [{
+                    "games": {"minutes": 90, "number": 7, "position": "F", "rating": "8.1", "captain": False,
+                              "substitute": False}, "shots": {"total": 4, "on": 2}, "goals": {"total": 1, "assists": 1},
+                    "passes": {"total": 40, "key": 3, "accuracy": "31"}, "cards": {"yellow": 1, "red": 0},
+                    "penalty": {"commited": None, "scored": 0}}]}]}]
+                f["events"] = [{"time": {"elapsed": 23}, "team": {"id": 42}, "player": {"id": 7, "name": "B. Saka"},
+                                "assist": {"id": 19, "name": "L. Trossard"}, "type": "Goal", "detail": "Normal Goal"}]
+                out.append(f)
+            return {"response": out}
+        if path == "/fixtures":
+            return {"response": [fx(1001 if params["season"] == 2025 else 2001, params["season"])]}
+        if path == "/injuries":
+            page = params.get("page", 1)
+            return {"paging": {"current": page, "total": 2}, "response": [
+                {"player": {"id": 100 + page, "name": f"P{page}", "type": "Missing Fixture", "reason": "Knee Injury"},
+                 "team": {"id": 42}, "fixture": {"id": 1001 if params["season"] == 2025 else 2001,
+                                                 "date": f"{params['season']}-09-01"}}]}
+        if path == "/players":
+            return {"paging": {"current": 1, "total": 1}, "response": [
+                {"player": {"id": 7, "name": "B. Saka", "birth": {"date": "2001-09-05"}, "nationality": "England"},
+                 "statistics": [{"team": {"id": params["team"]}, "league": {"id": 39},
+                                 "games": {"appearences": 30, "lineups": 28, "minutes": 2500, "position": "Attacker",
+                                           "rating": "7.4"}, "goals": {"total": 12, "assists": 9}}]}]}
+        if path == "/transfers":
+            return {"response": [{"player": {"id": 7, "name": "B. Saka"}, "transfers": [
+                {"date": "2018-07-01", "type": "N/A", "teams": {"in": {"id": 42, "name": "Arsenal"},
+                                                                "out": {"id": 9, "name": "Arsenal U18"}}}]}]}
+        raise AssertionError(path)
+
+
+def test_api_football_history_backfill_resume_and_archive(tmp_path):
+    from matchpredictor import detail
+    from matchpredictor.ingest import api_football_history as afh
+    teams = {"Arsenal": {"competitions": ["EPL"]}, "Man City": {"competitions": ["EPL"]}}
+    d1 = detail.connect(tmp_path / "d1.db")
+    fake = _FakeAF()
+    out = afh.Backfill(None, d1, [], client=fake).run(teams, current=2026, first=2025)
+    assert out["complete"] and out["teams"] == 2 and out["detail"] == 2
+    assert {r[0] for r in d1.execute("SELECT our_name FROM af_teams WHERE our_name IS NOT NULL")} == {"Arsenal", "Man City"}
+    assert d1.execute("SELECT COUNT(*) FROM af_competitions WHERE name LIKE 'Friendl%'").fetchone()[0] == 0
+    pm = d1.execute("SELECT minutes, rating, shots, goals, assists, yellow FROM af_player_match WHERE fixture_id=1001").fetchone()
+    assert tuple(pm) == (90, 8.1, 4, 1, 1, 1)
+    assert d1.execute("SELECT value FROM af_team_stats WHERE fixture_id=1001 AND stat='expected_goals'").fetchone()[0] == "1.85"
+    assert d1.execute("SELECT COUNT(*) FROM af_injuries WHERE season=2025").fetchone()[0] == 2        # both pages
+    assert d1.execute("SELECT started FROM af_lineups WHERE player_id=19").fetchone()[0] == 0
+    assert d1.execute("SELECT type, minute FROM af_events").fetchone()[:] == ("Goal", 23)
+    # a second run fetches only the current season again
+    fake.calls.clear()
+    afh.Backfill(None, d1, [], client=fake).run(teams, current=2026, first=2025)
+    assert all(p.get("season") in (None, 2026) for path, p in fake.calls if path != "/transfers"), fake.calls
+    # archive: finished season only, reload into a fresh db
+    files = detail.export_af(d1, finished_before=2026, out_dir=tmp_path / "af")
+    assert files["af_player_match_2025"] == 1 and "af_player_match_2026" not in files
+    d2 = detail.connect(tmp_path / "d2.db")
+    detail.load_af(d2, tmp_path / "af")
+    assert d2.execute("SELECT rating FROM af_player_match WHERE fixture_id=1001").fetchone()[0] == 8.1
+    fake.calls.clear()
+    afh.Backfill(None, d2, [], client=fake).run(teams, current=2026, first=2025)
+    assert not any(p.get("season") == 2025 for _, p in fake.calls)       # archived season not re-fetched

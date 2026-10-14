@@ -59,6 +59,8 @@ def main(argv=None):
     d = sub.add_parser("detail", help="per-match players and shots (data/detail.db)")
     d.add_argument("--load", action="store_true", help="load the committed archives into detail.db first")
     d.add_argument("--download", action="store_true", help="fetch missing matches from Understat")
+    d.add_argument("--apifootball", action="store_true", help="fetch API-Football history for the team list")
+    d.add_argument("--apifootball-sample", action="store_true", help="~8-request real-data parsing check")
     d.add_argument("--export", action="store_true", help="write archives for finished seasons")
     d.add_argument("--seasons", type=int, default=None, help="past seasons to cover (default: history_seasons)")
     d.add_argument("--pause", type=float, default=1.0, help="seconds between Understat downloads")
@@ -124,14 +126,23 @@ def main(argv=None):
             notes: list[str] = []
             dconn = detail.connect()
             out = {}
+            af_current = 2000 + int(current[:2])            # API-Football season = start year
             if args.load:
                 out["loaded"] = detail.load_archive(dconn)
+                out["loaded_api_football"] = len(detail.load_af(dconn))
             if args.download:
                 out["download"] = detail.sync_understat(conn, dconn, seasons, notes, pause=args.pause, limit=args.limit)
+            if args.apifootball_sample:
+                from .ingest import api_football_history as afh
+                out["api_football_sample"] = afh.Backfill(conn, dconn, notes).sample(afh.load_team_list(), af_current)
+            if args.apifootball:
+                from .ingest import api_football_history as afh
+                out["api_football"] = afh.Backfill(conn, dconn, notes).run(afh.load_team_list(), af_current)
             if args.export:
                 out["exported"] = {f"{lg}_{s}": detail.export_archive(dconn, lg, s)
                                    for lg, s in dconn.execute("SELECT DISTINCT league, season FROM detail_matches")
                                    if s != current}
+                out["exported_api_football"] = detail.export_af(dconn, finished_before=af_current)
             dconn.close()
             print(json.dumps(out, indent=1, default=str))
             print("\n".join(notes))

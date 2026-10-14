@@ -1,8 +1,8 @@
 """API-Football (v3): fixtures, referees, injuries, lineups, penalties, historical Champions League.
 
-The free plan allows 100 requests/day and only seasons 2022-2024, so for the current season the
-client gets a plan error on its first call, turns itself off for the run, and the pipeline degrades
-to "no absences / no referee" with a note. Historical calls (backtest) use seasons the plan allows
+Plan limits come from settings.api_football (PRO since 2026-10-14: 7,500 requests/day, every season and
+endpoint). On a plan / quota / key error the client turns itself off for the run and the pipeline
+degrades to "no absences / no referee" with a note. Bulk history lives in api_football_history.py. Historical calls (backtest) use seasons the plan allows
 and are cached on disk forever (data/cache/api_football), so repeated CI runs don't spend quota.
 """
 from __future__ import annotations
@@ -59,6 +59,19 @@ class Client:
             cached = cache_get(self.conn, key, ttl)
             if cached is not None:
                 return cached["response"] if isinstance(cached, dict) and "response" in cached else cached
+        body = self.fetch(path, params)
+        resp = body["response"]
+        if forever:
+            FILE_CACHE.mkdir(parents=True, exist_ok=True)
+            fpath.write_text(json.dumps(resp))
+        else:
+            cache_put(self.conn, key, body)
+        return resp
+
+    def fetch(self, path: str, params: dict) -> dict:
+        """One uncached request: pacing, quota accounting, plan errors. Returns the whole body
+        (response + paging), for bulk downloads that store parsed rows instead of raw responses."""
+        cfg = config.settings()["api_football"]
         if self.disabled_reason:
             raise ApiFootballUnavailable(self.disabled_reason)
         if usage_today(self.conn, PROVIDER) >= cfg["daily_limit"] - cfg["reserve_requests"]:
@@ -66,7 +79,7 @@ class Client:
             raise ApiFootballUnavailable(self.disabled_reason)
         wait = cfg.get("min_interval_seconds", 0) - (time.monotonic() - Client._last_call)
         if wait > 0:
-            time.sleep(wait)          # free plan: 10 requests/minute
+            time.sleep(wait)          # per-minute rate limit
         Client._last_call = time.monotonic()
         try:
             r = requests.get(f"{BASE}{path}", params=params, timeout=60,
@@ -83,13 +96,7 @@ class Client:
             if isinstance(errors, dict) and any(k in errors for k in ("plan", "token", "requests", "access")):
                 self.disabled_reason = msg       # plan/quota errors will repeat: stop for this run
             raise ApiFootballUnavailable(msg)
-        resp = body["response"]
-        if forever:
-            FILE_CACHE.mkdir(parents=True, exist_ok=True)
-            fpath.write_text(json.dumps(resp))
-        else:
-            cache_put(self.conn, key, body)
-        return resp
+        return body
 
     # ---- endpoints ----
     def fixtures(self, league_id: int, season: int, date_from: str, date_to: str):
