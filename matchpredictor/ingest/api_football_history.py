@@ -60,14 +60,25 @@ class Backfill:
 
     # ---------------------------------------------------------------- plumbing
     def _call(self, path: str, params: dict) -> dict:
-        for attempt in (1, 2):
+        """One request with retries: a dropped connection (seen after ~800 requests on 2026-10-14) waits and
+        retries up to 4 times; the per-minute limit waits one window. Plan / quota errors stop the run."""
+        net_tries = 0
+        rate_tried = False
+        while True:
             try:
                 body = self.client.fetch(path, params)
                 self.requests += 1
                 return body
             except ApiFootballUnavailable as e:
-                if attempt == 1 and "ratelimit" in str(e).lower().replace(" ", ""):
-                    time.sleep(61)      # per-minute limit: wait one window, retry once
+                msg = str(e)
+                if msg.startswith("network error") and net_tries < 4:
+                    net_tries += 1
+                    self.client.disabled_reason = None      # the client stops itself on network errors
+                    time.sleep(5 * net_tries)
+                    continue
+                if not rate_tried and "ratelimit" in msg.lower().replace(" ", ""):
+                    rate_tried = True
+                    time.sleep(61)
                     continue
                 raise
 

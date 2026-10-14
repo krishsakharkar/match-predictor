@@ -654,3 +654,23 @@ def test_player_name_matching():
     assert same_player("B. Saka", "Bukayo Saka") and same_player("Rodri", "Rodrigo Hernández Rodri")
     assert same_player("Vinícius Júnior", "Vinicius Junior")
     assert not same_player("B. Saka", "J. Saka") and not same_player("Gabriel Jesus", "Gabriel Martinelli")
+
+
+def test_api_football_history_retries_dropped_connections(tmp_path, monkeypatch):
+    from matchpredictor import detail
+    from matchpredictor.ingest import api_football_history as afh
+    from matchpredictor.ingest.api_football import ApiFootballUnavailable
+    monkeypatch.setattr(afh.time, "sleep", lambda s: None)
+    fake, fails = _FakeAF(), {"n": 2}
+    real = fake.fetch
+
+    def flaky(path, params):
+        if fails["n"]:
+            fails["n"] -= 1
+            fake.disabled_reason = "network error: ChunkedEncodingError"
+            raise ApiFootballUnavailable(fake.disabled_reason)
+        return real(path, params)
+    fake.fetch, fake.disabled_reason = flaky, None
+    out = afh.Backfill(None, detail.connect(tmp_path / "d.db"), [], client=fake).run(
+        {"Arsenal": {"competitions": ["EPL"]}}, current=2026, first=2026)
+    assert out["complete"] and fails["n"] == 0
