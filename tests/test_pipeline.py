@@ -185,7 +185,7 @@ def test_gate(tmp_path):
                         "kickoff_utc": "2026-10-17T21:00:00Z", "status": "SCHEDULED"})
     c.commit(); c.close()
     assert schedule.gate(datetime(2026, 10, 17, 20, 7, tzinfo=timezone.utc), p) == "prekickoff"
-    assert schedule.gate(datetime(2026, 10, 17, 19, 7, tzinfo=timezone.utc), p) == "skip"
+    assert schedule.gate(datetime(2026, 10, 17, 19, 7, tzinfo=timezone.utc), p) == "results"   # 14:00 game still unscored
     assert schedule.gate(datetime(2026, 10, 17, 20, 7, tzinfo=timezone.utc), tmp_path / "none.db") == "skip"
 
 
@@ -328,7 +328,8 @@ def test_gate_results_mode(tmp_path):
                         "kickoff_utc": "2026-10-17T14:00:00Z", "status": "SCHEDULED"})
     c.commit(); c.close()
     assert schedule.gate(datetime(2026, 10, 17, 17, 7, tzinfo=timezone.utc), p) == "results"   # 3h after
-    assert schedule.gate(datetime(2026, 10, 17, 22, 7, tzinfo=timezone.utc), p) == "skip"      # 8h after
+    assert schedule.gate(datetime(2026, 10, 17, 22, 7, tzinfo=timezone.utc), p) == "results"   # 8h after (missed ticks)
+    assert schedule.gate(datetime(2026, 10, 18, 3, 7, tzinfo=timezone.utc), p) == "skip"       # 13h after
 
 
 def test_retro_predictions_excluded_from_live_tracking(conn):
