@@ -21,16 +21,18 @@
     el.innerHTML = `<div class="empty">${missing ? "No data yet. The pipeline hasn't run." : "Could not load data."}<br><span class="small">${MP.esc(e.message)}</span></div>`;
   };
   MP.localDay = m => (m.kickoff_utc ? new Date(m.kickoff_utc) : new Date(m.date + "T12:00:00Z"));
-  const dayKey = d => d.toLocaleDateString(undefined, { year: "numeric", month: "2-digit", day: "2-digit" });
+  // every date and time on the site is US Eastern (the owner is in New York), whatever the viewer's device says
+  MP.TZ = "America/New_York";
+  const dayKey = d => d.toLocaleDateString("en-US", { timeZone: MP.TZ, year: "numeric", month: "2-digit", day: "2-digit" });
   MP.dayLabel = d => {
-    const t = new Date(), y = new Date(), tm = new Date();
-    y.setDate(t.getDate() - 1); tm.setDate(t.getDate() + 1);
+    const t = new Date(), y = new Date(t.getTime() - 864e5), tm = new Date(t.getTime() + 864e5);
     if (dayKey(d) === dayKey(t)) return "Today";
     if (dayKey(d) === dayKey(tm)) return "Tomorrow";
     if (dayKey(d) === dayKey(y)) return "Yesterday";
-    return d.toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "short" });
+    return d.toLocaleDateString("en-US", { timeZone: MP.TZ, weekday: "long", day: "numeric", month: "short" });
   };
-  MP.timeOf = m => (m.kickoff_utc ? new Date(m.kickoff_utc).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" }) : "");
+  MP.timeOf = m => (m.kickoff_utc ? new Date(m.kickoff_utc).toLocaleTimeString("en-US", { timeZone: MP.TZ, hour: "numeric", minute: "2-digit" }) + " ET" : "");
+  MP.stamp = iso => new Date(iso).toLocaleString("en-US", { timeZone: MP.TZ, dateStyle: "medium", timeStyle: "short" }) + " ET";
   MP.grouped = (list, cardFn) => {
     const groups = [];
     for (const m of list) {

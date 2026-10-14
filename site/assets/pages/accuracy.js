@@ -74,7 +74,7 @@
       const lgs = [...new Set(bt.matches.map(r => r.league))];
       html += `<h3>Match by match (backtest ${esc(bt.test_season_label)})</h3><div class="filters" id="btf">${["All", ...lgs].map((l, i) => `<button class="chip ${i === 0 ? "on" : ""}" data-l="${esc(l)}">${esc(l)}</button>`).join("")}</div><div id="bt-table"></div>`;
     }
-    html += `<p class="muted small">Updated ${esc(new Date((acc && acc.generated_at) || Date.now()).toLocaleString())}</p>`;
+    html += `<p class="muted small">Updated ${esc(MP.stamp((acc && acc.generated_at) || new Date().toISOString()))}</p>`;
     app.innerHTML = html;
     if (bt && bt.matches) {
       let lim = 100, lg = "All";
