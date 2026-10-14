@@ -21,6 +21,12 @@ Three SQLite files, each with one job:
   Europe, extra leagues) `COMP:date:home:away`. Competitions we don't configure are `AF<league id>`.
 - **Seasons** are July-June codes: `2526` = 2025-26. API-Football's season year 2025 is `2526`.
 - **Scores** are 90-minute scores. Extra time and penalties are separate columns.
+- **xG** is the sum of Understat's shot xG wherever we have the shots (one definition for every season: Understat
+  re-rated old shots but not its old league-page totals, which differ by > 0.1 in ~10% of 2021-23 matches; the page
+  value is kept in `home_xg_page` / `away_xg_page`), else Understat's page value, else API-Football's xG.
+- **Relegation / promotion play-offs** that API-Football files under a top league get their own competition
+  (`BUNDESLIGA_PO`, `LIGUE1_PO`, ...): they are not league games and must not mix 2nd-division clubs into a league.
+- Impossible provider values (e.g. a player with -86 minutes) are blanked, and the audit says how many.
 - **Player ids**: `af:<API-Football id>` (one per real person). Understat players are linked to it by name agreement
   in the same match and team (majority vote over all shared matches); Understat-only players are `us:<id>`.
 - **Times** are UTC in the data; the site shows US Eastern.
@@ -69,6 +75,12 @@ stays first for xG because the result model was tuned on it (`model.xg_weight`).
   injuries where API-Football's coverage flags say so (see `d.af_competitions`); no Understat xG.
 - **Cups and Europe**: API-Football detail for every European match and every cup match of a tracked club;
   results seeds back to 2021-22 (`data/history/*_results*.csv`).
+
+## Audit
+
+`python -m matchpredictor audit` (also in every `backfill` run's job summary) reports completeness - every finished
+API fixture of a tracked club present, detail where covered, big-five xG and Understat rows - and accuracy: score =
+goal events = players' goals, 11 starters, sane minutes, cross-source agreement, player-identity links.
 
 ## Checks run on every build (`build_log`)
 

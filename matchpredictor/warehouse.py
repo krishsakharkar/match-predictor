@@ -29,7 +29,8 @@ CREATE TABLE matches (
     home TEXT, away TEXT, status TEXT,
     home_goals INTEGER, away_goals INTEGER,            -- 90 minutes
     ht_home INTEGER, ht_away INTEGER, et_home INTEGER, et_away INTEGER, pen_home INTEGER, pen_away INTEGER,
-    home_xg REAL, away_xg REAL, xg_source TEXT,
+    home_xg REAL, away_xg REAL, xg_source TEXT,          -- Understat shot sum > Understat page > API-Football
+    home_xg_page REAL, away_xg_page REAL,              -- Understat's league-page value (older model in 2021-23)
     referee TEXT, venue TEXT,
     close_home REAL, close_draw REAL, close_away REAL, close_over25 REAL, close_under25 REAL,
     af_fixture_id INTEGER, understat_id TEXT, sources TEXT);
@@ -70,6 +71,9 @@ CREATE TABLE transfers (player_id TEXT, player TEXT, date TEXT, type TEXT, team_
     PRIMARY KEY (player_id, date, team_in, team_out));
 CREATE TABLE build_log (step TEXT PRIMARY KEY, rows INTEGER, note TEXT);
 """
+
+# relegation / promotion play-offs that API-Football files under a top league ("Relegation Round", "Final")
+_PLAYOFF = re.compile(r"relegation|play-?off|final|promotion", re.I)
 
 # youth, reserve and women's sides: never mapped onto a senior club by name
 _YOUTH = re.compile(r"(\bU-?\d{2}\b|\bII\b|\bB\b$|\bW\b|\bWomen\b|\bFemenino\b|\bFrauen\b|\bReserves?\b|\bJong\b|"
@@ -310,6 +314,8 @@ class Builder:
             if st not in FINISHED and st not in ("NS", "TBD"):
                 continue        # cancelled, postponed, abandoned, awarded: not a match that was (or will be) played
             comp = af_to_comp.get(lid, f"AF{lid}")
+            if comp in self.top_leagues and _PLAYOFF.search(rnd or ""):
+                comp = self._playoff_comp(comp)          # a relegation play-off is not a league game
             home, away = af_team.get(hid, hname), af_team.get(aid, aname)
             finished = st in FINISHED
             if finished and fth is None and hg is not None:     # older archives: goals include extra time
@@ -365,6 +371,15 @@ class Builder:
         self._log("matches", self.w.execute("SELECT COUNT(*) FROM matches").fetchone()[0],
                   f"{merged} API-Football fixtures merged onto existing matches, {added} added")
         return fixture_to_match
+
+    def _playoff_comp(self, comp: str) -> str:
+        code = f"{comp}_PO"
+        if code not in self.comp_type:
+            name = config.competitions(enabled_only=False).get(comp, {}).get("name", comp)
+            self.comp_type[code] = "playoff"
+            self.w.execute("INSERT OR IGNORE INTO competitions VALUES (?,?,?,?,?)",
+                           (code, f"{name} relegation play-off", "playoff", self.comp_country.get(comp), None))
+        return code
 
     # ---------------------------------------------------------------- team stats
     def team_stats(self, fixture_to_match: dict[int, str], af_team: dict[int, str]) -> None:
@@ -460,6 +475,8 @@ class Builder:
                 mid = fixture_to_match.get(r[0])
                 if not mid or not r[5]:          # unused substitutes (0 / no minutes) are lineup rows, not stats
                     continue
+                if not 0 < r[5] <= 130:          # provider error (one row says -86 minutes): drop the value
+                    r = (*r[:5], None, *r[6:])
                 self.w.execute(f"INSERT OR REPLACE INTO player_match_stats (match_id, team, player_id, player, started, "
                                "minutes, position, number, rating, captain, goals, assists, shots, shots_on_target, "
                                "key_passes, passes, pass_accuracy, tackles, interceptions, blocks, duels, duels_won, "
@@ -533,6 +550,25 @@ class Builder:
         for t in ("lineups", "events", "injuries", "squads", "transfers"):
             self._log(t, self.w.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0])
 
+    def shot_xg(self) -> None:
+        """Match xG = sum of Understat's shot xG where we have the shots. Understat re-rated old shots but not
+        the match totals on its league pages (2021-23: 10% of matches differ by > 0.1), so the shot sum is the
+        one definition that is the same in every season. The page value is kept in *_xg_page."""
+        if not self.has_us:
+            return
+        self.w.execute("UPDATE matches SET home_xg_page=home_xg, away_xg_page=away_xg WHERE xg_source='understat'")
+        self.w.execute("""UPDATE matches SET
+            home_xg=(SELECT SUM(xg) FROM shots s WHERE s.match_id=matches.match_id AND s.team=matches.home AND s.result<>'OwnGoal'),
+            away_xg=(SELECT SUM(xg) FROM shots s WHERE s.match_id=matches.match_id AND s.team=matches.away AND s.result<>'OwnGoal'),
+            xg_source='understat-shots'
+            WHERE match_id IN (SELECT match_id FROM shots)""")
+        for col, side in (("home", "h"), ("away", "a")):     # a side without a single shot has 0 xG
+            self.w.execute(f"UPDATE matches SET {col}_xg=0 WHERE xg_source='understat-shots' AND {col}_xg IS NULL")
+        self.w.execute("""UPDATE team_match_stats SET
+            xg=(SELECT CASE WHEN side='h' THEN home_xg ELSE away_xg END FROM matches m WHERE m.match_id=team_match_stats.match_id),
+            xg_against=(SELECT CASE WHEN side='h' THEN away_xg ELSE home_xg END FROM matches m WHERE m.match_id=team_match_stats.match_id)
+            WHERE match_id IN (SELECT match_id FROM shots)""")
+
     # ---------------------------------------------------------------- checks
     def checks(self) -> list[str]:
         """Cross-source sanity checks; problems are logged in build_log, not hidden."""
@@ -560,6 +596,7 @@ class Builder:
         self.team_stats(fixture_to_match, af_team)
         self.players(fixture_to_match, af_team)
         self.af_tables(fixture_to_match, af_team, af_to_comp)
+        self.shot_xg()
         checks = self.checks()
         for step, (rows, note) in self.log.items():
             self.w.execute("INSERT OR REPLACE INTO build_log VALUES (?,?,?)", (step, rows, note))
