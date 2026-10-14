@@ -32,7 +32,11 @@ jobs:
     outputs:
       mode: ${{ steps.gate.outputs.mode }}
     steps:
+      # the branch head at start time, not the commit the run was triggered on: runs are queued one at a time,
+      # so each starts from the data the previous run committed (a stale copy once overwrote a fresh match.db)
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
 
       - name: Decide what to run
         id: gate
@@ -123,7 +127,8 @@ jobs:
         run: |
           git config user.name "match-predictor bot"
           git config user.email "actions@users.noreply.github.com"
-          git add data/match.db site/data/ data/history/
+          # backfill runs only add archives: their match.db changes are request counters, never results
+          if [ "${{ steps.gate.outputs.mode }}" = "backfill" ]; then git add data/history/; else git add data/match.db site/data/ data/history/; fi
           if git diff --cached --quiet; then
             echo "no changes"
           else
