@@ -1,0 +1,560 @@
+{
+  "season": "2026-27",
+  "note": "Team names are the football-data.co.uk spellings the database uses. Checked against UEFA / league sources on 2026-10-14.",
+  "UCL": [
+    "AEK Athens",
+    "Arsenal",
+    "Aston Villa",
+    "Ath Madrid",
+    "Barcelona",
+    "Bayern Munich",
+    "Betis",
+    "Bodø/Glimt",
+    "Club Brugge KV",
+    "Como",
+    "Dortmund",
+    "FC Porto",
+    "Fenerbahçe",
+    "Feyenoord",
+    "Galatasaray",
+    "Inter",
+    "LASK",
+    "Lens",
+    "Lille",
+    "Liverpool",
+    "Man City",
+    "Man United",
+    "Napoli",
+    "PSV Eindhoven",
+    "Paris SG",
+    "RB Leipzig",
+    "Real Madrid",
+    "Roma",
+    "Sabah FK",
+    "Shakhtar Donetsk",
+    "Slavia Praha",
+    "Slovan Bratislava",
+    "Sporting CP",
+    "Stuttgart",
+    "Viking FK",
+    "Villarreal"
+  ],
+  "EPL": [
+    "Arsenal",
+    "Aston Villa",
+    "Bournemouth",
+    "Brentford",
+    "Brighton",
+    "Chelsea",
+    "Coventry",
+    "Crystal Palace",
+    "Everton",
+    "Fulham",
+    "Hull",
+    "Ipswich",
+    "Leeds",
+    "Liverpool",
+    "Man City",
+    "Man United",
+    "Newcastle",
+    "Nott'm Forest",
+    "Sunderland",
+    "Tottenham"
+  ],
+  "LALIGA": [
+    "Alaves",
+    "Ath Bilbao",
+    "Ath Madrid",
+    "Barcelona",
+    "Betis",
+    "Celta",
+    "Elche",
+    "Espanol",
+    "Getafe",
+    "La Coruna",
+    "Levante",
+    "Malaga",
+    "Osasuna",
+    "Real Madrid",
+    "Santander",
+    "Sevilla",
+    "Sociedad",
+    "Valencia",
+    "Vallecano",
+    "Villarreal"
+  ],
+  "teams": {
+    "AEK Athens": {
+      "country": "Greece",
+      "domestic_league": "GRE",
+      "competitions": [
+        "UCL"
+      ]
+    },
+    "Alaves": {
+      "country": "Spain",
+      "domestic_league": "LALIGA",
+      "competitions": [
+        "LALIGA"
+      ]
+    },
+    "Arsenal": {
+      "country": "England",
+      "domestic_league": "EPL",
+      "competitions": [
+        "UCL",
+        "EPL"
+      ]
+    },
+    "Aston Villa": {
+      "country": "England",
+      "domestic_league": "EPL",
+      "competitions": [
+        "UCL",
+        "EPL"
+      ]
+    },
+    "Ath Bilbao": {
+      "country": "Spain",
+      "domestic_league": "LALIGA",
+      "competitions": [
+        "LALIGA"
+      ]
+    },
+    "Ath Madrid": {
+      "country": "Spain",
+      "domestic_league": "LALIGA",
+      "competitions": [
+        "UCL",
+        "LALIGA"
+      ]
+    },
+    "Barcelona": {
+      "country": "Spain",
+      "domestic_league": "LALIGA",
+      "competitions": [
+        "UCL",
+        "LALIGA"
+      ]
+    },
+    "Bayern Munich": {
+      "country": "Germany",
+      "domestic_league": "BUNDESLIGA",
+      "competitions": [
+        "UCL"
+      ]
+    },
+    "Betis": {
+      "country": "Spain",
+      "domestic_league": "LALIGA",
+      "competitions": [
+        "UCL",
+        "LALIGA"
+      ]
+    },
+    "Bodø/Glimt": {
+      "country": "Norway",
+      "domestic_league": "NOR",
+      "competitions": [
+        "UCL"
+      ]
+    },
+    "Bournemouth": {
+      "country": "England",
+      "domestic_league": "EPL",
+      "competitions": [
+        "EPL"
+      ]
+    },
+    "Brentford": {
+      "country": "England",
+      "domestic_league": "EPL",
+      "competitions": [
+        "EPL"
+      ]
+    },
+    "Brighton": {
+      "country": "England",
+      "domestic_league": "EPL",
+      "competitions": [
+        "EPL"
+      ]
+    },
+    "Celta": {
+      "country": "Spain",
+      "domestic_league": "LALIGA",
+      "competitions": [
+        "LALIGA"
+      ]
+    },
+    "Chelsea": {
+      "country": "England",
+      "domestic_league": "EPL",
+      "competitions": [
+        "EPL"
+      ]
+    },
+    "Club Brugge KV": {
+      "country": "Belgium",
+      "domestic_league": "BEL",
+      "competitions": [
+        "UCL"
+      ]
+    },
+    "Como": {
+      "country": "Italy",
+      "domestic_league": "SERIEA",
+      "competitions": [
+        "UCL"
+      ]
+    },
+    "Coventry": {
+      "country": "England",
+      "domestic_league": "EPL",
+      "competitions": [
+        "EPL"
+      ]
+    },
+    "Crystal Palace": {
+      "country": "England",
+      "domestic_league": "EPL",
+      "competitions": [
+        "EPL"
+      ]
+    },
+    "Dortmund": {
+      "country": "Germany",
+      "domestic_league": "BUNDESLIGA",
+      "competitions": [
+        "UCL"
+      ]
+    },
+    "Elche": {
+      "country": "Spain",
+      "domestic_league": "LALIGA",
+      "competitions": [
+        "LALIGA"
+      ]
+    },
+    "Espanol": {
+      "country": "Spain",
+      "domestic_league": "LALIGA",
+      "competitions": [
+        "LALIGA"
+      ]
+    },
+    "Everton": {
+      "country": "England",
+      "domestic_league": "EPL",
+      "competitions": [
+        "EPL"
+      ]
+    },
+    "FC Porto": {
+      "country": "Portugal",
+      "domestic_league": "POR",
+      "competitions": [
+        "UCL"
+      ]
+    },
+    "Fenerbahçe": {
+      "country": "Turkey",
+      "domestic_league": "TUR",
+      "competitions": [
+        "UCL"
+      ]
+    },
+    "Feyenoord": {
+      "country": "Netherlands",
+      "domestic_league": "NED",
+      "competitions": [
+        "UCL"
+      ]
+    },
+    "Fulham": {
+      "country": "England",
+      "domestic_league": "EPL",
+      "competitions": [
+        "EPL"
+      ]
+    },
+    "Galatasaray": {
+      "country": "Turkey",
+      "domestic_league": "TUR",
+      "competitions": [
+        "UCL"
+      ]
+    },
+    "Getafe": {
+      "country": "Spain",
+      "domestic_league": "LALIGA",
+      "competitions": [
+        "LALIGA"
+      ]
+    },
+    "Hull": {
+      "country": "England",
+      "domestic_league": "EPL",
+      "competitions": [
+        "EPL"
+      ]
+    },
+    "Inter": {
+      "country": "Italy",
+      "domestic_league": "SERIEA",
+      "competitions": [
+        "UCL"
+      ]
+    },
+    "Ipswich": {
+      "country": "England",
+      "domestic_league": "EPL",
+      "competitions": [
+        "EPL"
+      ]
+    },
+    "LASK": {
+      "country": "Austria",
+      "domestic_league": "AUT",
+      "competitions": [
+        "UCL"
+      ]
+    },
+    "La Coruna": {
+      "country": "Spain",
+      "domestic_league": "LALIGA",
+      "competitions": [
+        "LALIGA"
+      ]
+    },
+    "Leeds": {
+      "country": "England",
+      "domestic_league": "EPL",
+      "competitions": [
+        "EPL"
+      ]
+    },
+    "Lens": {
+      "country": "France",
+      "domestic_league": "LIGUE1",
+      "competitions": [
+        "UCL"
+      ]
+    },
+    "Levante": {
+      "country": "Spain",
+      "domestic_league": "LALIGA",
+      "competitions": [
+        "LALIGA"
+      ]
+    },
+    "Lille": {
+      "country": "France",
+      "domestic_league": "LIGUE1",
+      "competitions": [
+        "UCL"
+      ]
+    },
+    "Liverpool": {
+      "country": "England",
+      "domestic_league": "EPL",
+      "competitions": [
+        "UCL",
+        "EPL"
+      ]
+    },
+    "Malaga": {
+      "country": "Spain",
+      "domestic_league": "LALIGA",
+      "competitions": [
+        "LALIGA"
+      ]
+    },
+    "Man City": {
+      "country": "England",
+      "domestic_league": "EPL",
+      "competitions": [
+        "UCL",
+        "EPL"
+      ]
+    },
+    "Man United": {
+      "country": "England",
+      "domestic_league": "EPL",
+      "competitions": [
+        "UCL",
+        "EPL"
+      ]
+    },
+    "Napoli": {
+      "country": "Italy",
+      "domestic_league": "SERIEA",
+      "competitions": [
+        "UCL"
+      ]
+    },
+    "Newcastle": {
+      "country": "England",
+      "domestic_league": "EPL",
+      "competitions": [
+        "EPL"
+      ]
+    },
+    "Nott'm Forest": {
+      "country": "England",
+      "domestic_league": "EPL",
+      "competitions": [
+        "EPL"
+      ]
+    },
+    "Osasuna": {
+      "country": "Spain",
+      "domestic_league": "LALIGA",
+      "competitions": [
+        "LALIGA"
+      ]
+    },
+    "PSV Eindhoven": {
+      "country": "Netherlands",
+      "domestic_league": "NED",
+      "competitions": [
+        "UCL"
+      ]
+    },
+    "Paris SG": {
+      "country": "France",
+      "domestic_league": "LIGUE1",
+      "competitions": [
+        "UCL"
+      ]
+    },
+    "RB Leipzig": {
+      "country": "Germany",
+      "domestic_league": "BUNDESLIGA",
+      "competitions": [
+        "UCL"
+      ]
+    },
+    "Real Madrid": {
+      "country": "Spain",
+      "domestic_league": "LALIGA",
+      "competitions": [
+        "UCL",
+        "LALIGA"
+      ]
+    },
+    "Roma": {
+      "country": "Italy",
+      "domestic_league": "SERIEA",
+      "competitions": [
+        "UCL"
+      ]
+    },
+    "Sabah FK": {
+      "country": "Azerbaijan",
+      "domestic_league": null,
+      "competitions": [
+        "UCL"
+      ]
+    },
+    "Santander": {
+      "country": "Spain",
+      "domestic_league": "LALIGA",
+      "competitions": [
+        "LALIGA"
+      ]
+    },
+    "Sevilla": {
+      "country": "Spain",
+      "domestic_league": "LALIGA",
+      "competitions": [
+        "LALIGA"
+      ]
+    },
+    "Shakhtar Donetsk": {
+      "country": "Ukraine",
+      "domestic_league": null,
+      "competitions": [
+        "UCL"
+      ]
+    },
+    "Slavia Praha": {
+      "country": "Czechia",
+      "domestic_league": null,
+      "competitions": [
+        "UCL"
+      ]
+    },
+    "Slovan Bratislava": {
+      "country": "Slovakia",
+      "domestic_league": null,
+      "competitions": [
+        "UCL"
+      ]
+    },
+    "Sociedad": {
+      "country": "Spain",
+      "domestic_league": "LALIGA",
+      "competitions": [
+        "LALIGA"
+      ]
+    },
+    "Sporting CP": {
+      "country": "Portugal",
+      "domestic_league": "POR",
+      "competitions": [
+        "UCL"
+      ]
+    },
+    "Stuttgart": {
+      "country": "Germany",
+      "domestic_league": "BUNDESLIGA",
+      "competitions": [
+        "UCL"
+      ]
+    },
+    "Sunderland": {
+      "country": "England",
+      "domestic_league": "EPL",
+      "competitions": [
+        "EPL"
+      ]
+    },
+    "Tottenham": {
+      "country": "England",
+      "domestic_league": "EPL",
+      "competitions": [
+        "EPL"
+      ]
+    },
+    "Valencia": {
+      "country": "Spain",
+      "domestic_league": "LALIGA",
+      "competitions": [
+        "LALIGA"
+      ]
+    },
+    "Vallecano": {
+      "country": "Spain",
+      "domestic_league": "LALIGA",
+      "competitions": [
+        "LALIGA"
+      ]
+    },
+    "Viking FK": {
+      "country": "Norway",
+      "domestic_league": "NOR",
+      "competitions": [
+        "UCL"
+      ]
+    },
+    "Villarreal": {
+      "country": "Spain",
+      "domestic_league": "LALIGA",
+      "competitions": [
+        "UCL",
+        "LALIGA"
+      ]
+    }
+  }
+}
