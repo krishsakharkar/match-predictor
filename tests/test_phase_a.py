@@ -260,6 +260,19 @@ def test_understat_store_skips_unmatched(conn):
     assert p["team"] == "Man City" and p["npxg"] == 19.0
 
 
+def test_understat_placeholder_xg_is_not_xg(conn):
+    m = {"id": "27930", "isResult": True, "datetime": "2025-02-09 16:30:00", "h": {"title": "Holstein Kiel"},
+         "a": {"title": "Bochum"}, "goals": {"h": "2", "a": "2"}, "xG": {"h": "2", "a": "2"}}
+    assert understat.match_xg(m) == (None, None)
+    assert understat.match_xg({**m, "xG": {"h": "2.0", "a": "1.86"}}) == (2.0, 1.86)
+    assert understat.match_xg({**m, "goals": {"h": "0", "a": "0"}, "xG": {"h": "0", "a": "0.4"}}) == (0.0, 0.4)
+    db.upsert_match(conn, {"league": "BUNDESLIGA", "season": "2425", "date": "2025-02-09", "home": "Holstein Kiel",
+                           "away": "Bochum", "status": "FT", "fthg": 2, "ftag": 2, "xg_home": 2.0, "xg_away": 2.0,
+                           "source": "understat"})          # stored before the placeholder was recognised
+    understat.store(conn, "BUNDESLIGA", "2425", {"dates": [m], "players": []}, {"Holstein Kiel", "Bochum"})
+    assert tuple(conn.execute("SELECT xg_home, xg_away FROM matches").fetchone()) == (None, None)
+
+
 def test_api_football_parsers():
     f = {"fixture": {"id": 7, "date": "2024-09-17T19:00:00+00:00", "referee": "S. Vincic, Slovenia",
                      "status": {"short": "FT"}},
@@ -478,6 +491,22 @@ def test_understat_match_rows():
     assert shots[0]["team"] == "A" and shots[0]["result"] == "Goal" and shots[0]["assisted_by"] == "Sub One"
 
 
+def test_understat_match_without_data_is_skipped(tmp_path, monkeypatch):
+    from matchpredictor import detail
+    monkeypatch.setattr(understat, "MATCH_DIR", tmp_path)
+    (tmp_path / "27930.json").write_text(json.dumps({"rosters": {"h": [], "a": []}, "shots": {"h": [], "a": []}}))
+    main = db.connect(":memory:")
+    db.upsert_match(main, {"league": "BUNDESLIGA", "season": "2425", "date": "2025-02-09", "home": "Holstein Kiel",
+                           "away": "Bochum", "status": "FT", "fthg": 2, "ftag": 2, "understat_id": "27930",
+                           "source": "understat"})
+    notes, d = [], detail.connect(tmp_path / "d.db")
+    out = detail.sync_understat(main, d, ["2425"], notes, pause=0)
+    assert out["empty"] == 1 and "27930" in notes[0]
+    assert d.execute("SELECT source FROM detail_matches").fetchone()[0] == "understat-empty"
+    assert d.execute("SELECT COUNT(*) FROM player_matches").fetchone()[0] == 0
+    assert detail.sync_understat(main, d, ["2425"], [], pause=0)["todo"] == 0      # not fetched again
+
+
 def test_detail_archive_round_trip(tmp_path, monkeypatch):
     from matchpredictor import detail
     monkeypatch.setattr(understat, "MATCH_DIR", tmp_path / "cache")
@@ -488,7 +517,7 @@ def test_detail_archive_round_trip(tmp_path, monkeypatch):
                            "status": "FT", "fthg": 1, "ftag": 0, "understat_id": "99", "source": "understat"})
     d1 = detail.connect(tmp_path / "d1.db")
     out = detail.sync_understat(main, d1, ["2526"], [], pause=0)
-    assert out == {"todo": 1, "stored": 1, "downloaded": 0, "failed": 0}       # served from cache
+    assert out == {"todo": 1, "stored": 1, "downloaded": 0, "failed": 0, "empty": 0}       # served from cache
     assert detail.sync_understat(main, d1, ["2526"], [], pause=0)["todo"] == 0  # nothing left to do
     counts = detail.export_archive(d1, "EPL", "2526", tmp_path / "arch")
     assert counts == {"matches": 1, "players": 3, "shots": 1}

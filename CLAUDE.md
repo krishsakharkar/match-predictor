@@ -156,3 +156,6 @@ site/  index.html (all pages as tabs), results/corners/cards/shots/players.html 
 - Understat multi-club player titles ("Club A,Club B") are alphabetical, not chronological, and were
   corrupted for Ligue 1 2026-27 (31 PSG/Rennes players merged): such players are skipped, and a team
   whose stored player minutes cover < 70% of its games (`absences.covered`) falls back to last season.
+- Understat sometimes lists a match with no data: empty rosters/shots (sent as lists) and a page 'xG' equal to the
+  score (Holstein Kiel 2-2 Bochum, 2025-02-09). Such xG is stored as missing and the match is recorded as
+  `understat-empty` in detail.db.
