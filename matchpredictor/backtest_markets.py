@@ -15,7 +15,7 @@ import pandas as pd
 
 from . import config
 from .models import cards, corners, shots
-from .predict import fit_league, load_matches
+from .predict import fit_league
 
 MAIN_LINE = {"corners": 9.5, "cards": 4.5, "shots": 24.5, "sot": 8.5}
 ACTUAL = {"corners": ("hc", "ac"), "cards": ("cards_h", "cards_a"), "shots": ("hs", "as_"), "sot": ("hst", "ast")}
@@ -89,8 +89,10 @@ def summarise(rows: list[dict], df, season: str) -> dict:
     return out
 
 
-def run(conn, season: str | None = None, refit_days: int = 14) -> dict:
-    df = load_matches(conn)
+def run(conn, season: str | None = None, refit_days: int = 14, df=None) -> dict:
+    if df is None:
+        from . import model_data
+        df = model_data.load_frame()
     if season is None:
         season = config.previous_seasons(config.season_code(pd.Timestamp.now()), 1)[0]
     xw = config.settings()["model"]["xg_weight"] if config.settings()["factors"].get("xg") else 0.0

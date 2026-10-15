@@ -83,6 +83,10 @@ matchpredictor/
                    data/history/understat/ and data/history/api_football/ (`detail --load` rebuilds in seconds)
   warehouse.py     data/warehouse.db: clean unified copy of everything (our names + match ids, one player id per
                    person, best source per column, cross-source checks) - see docs/DATA_MODEL.md
+  model_data.py    THE model's data: load_frame() = warehouse matches + team stats in the models' column names;
+                   prepare() loads newer archives into detail.db, rebuilds the warehouse (~2 min) and returns it.
+                   Every model calculation (DC, joint, Elo, rest, referee, corners/cards/shots, backtests) reads it;
+                   match.db only supplies the fixtures to predict and stores predictions. No fallback to match.db.
   backtest_markets.py  walk-forward accuracy of corners/cards/shots/SOT main lines vs a baseline
   match_markets.py corners/cards/shots/players blocks for a prediction payload
   backtest.py      collect → tune (2024-25) → ablation on 2025-26 → bookmaker benchmark → UCL section;
@@ -99,6 +103,9 @@ site/  index.html (all pages as tabs), results/corners/cards/shots/players.html 
 ```
 
 ### How a prediction is made (`predict.combine`)
+0. Data: `model_data.prepare()` rebuilds the warehouse from match.db + detail.db at the start of every predicting
+   run and backtest; the frame (all competitions incl. domestic cups, second divisions, UEL/UECL from API-Football)
+   feeds every step below.
 1. Same-league game (league match, or domestic cup between two clubs of one modelled league):
    Dixon-Coles on `xg_weight·xG + (1−xg_weight)·goals`, blended geometrically with the Elo model.
 2. Cross-league (Champions League, cups vs. foreign/lower clubs): the **joint model** (`fit_joint`) —
