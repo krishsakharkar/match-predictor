@@ -88,7 +88,8 @@ matchpredictor/
   pipeline.py      run(): history → fixtures → results → API-Football enrich → predict shown matches → site
   tracking.py      Brier, log loss, calibration, result / exact / top-3 hit rates on live predictions
   site.py          site/data/predictions.json (window) + accuracy.json (live tracking)
-  schedule.py      stdlib-only cron gate (keep stdlib-only: runs before deps are installed)
+  schedule.py      stdlib-only cron gate (keep stdlib-only: runs before deps are installed); weekly backfill
+                   Mondays 06-08 ET (catch-up after 8 days, clock = data/history/last_backfill.txt)
   betting.py       PAUSED value-bet helpers (odds polling, de-vig evaluation, bet logging)
 site/  index.html (all pages as tabs), results/corners/cards/shots/players.html (standalone), accuracy.html;
        assets/core.js + assets/pages/*.js + assets/shell.js render site/data/*.json

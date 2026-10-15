@@ -98,7 +98,8 @@ gaps at the source (Holstein Kiel v Bochum 2025-02-09: listed without data, its 
 Paris SG 2026-08-23: not listed) - both use API-Football xG; 5 disagreements (all awarded games), 2 possible duplicates
 (inside API-Football's own amateur-cup data), 0 spelling splits.
 
-Every `backfill` run also downloads new Understat matches (`detail --download`), so the current season's archive
-keeps up.
+A `backfill` runs every Monday 06:00-08:59 ET on its own (the hourly gate; if GitHub skips those ticks it catches up
+once the last one is 8 days old): API-Football's current season (~320 requests of the 7,500/day plan, ~10 min) and
+new Understat matches (`detail --download`), then the warehouse rebuild and the audit in the job summary.
 
 A non-zero count is a data problem to look at, not something to ignore.
