@@ -70,13 +70,13 @@ class Audit:
         gap = {r[0] for r in self.q("SELECT match_id FROM d.detail_matches WHERE source='understat-empty'")} | \
             {r[0] for r in self.q(f"SELECT match_id FROM matches WHERE status='FT' AND comp IN ({ph5}) AND season >= '2122' "
                                   "AND understat_id IS NULL", BIG5)}
-        und = [r[0] for r in big if r[0] not in us and r[0] not in gap]
+        und = self.pending_understat = [r[0] for r in big if r[0] not in us and r[0] not in gap]
         gaps = sorted(m for m in gap if m not in us)
         self.check("completeness", "big five: Understat player rows downloaded (where Understat has them)",
                    len(big) - len(gaps) - len(und), len(big) - len(gaps), und[-5:],
                    note="download still running" if und else "")
         self.check("completeness", "big five: matches Understat has no player data for (gap at the source; xG from "
-                   "API-Football)", len(gaps), 0, gaps, expect_all=False)
+                   "API-Football)", len(gaps), 0, [f"{len(gaps)}: {', '.join(gaps)}" if gaps else "0"], expect_all=False)
         # competitions shown in full: every finished match has a result
         for comp in ("EPL", "UCL"):
             rows = self.q("SELECT match_id, home_goals FROM matches WHERE comp=? AND status='FT' AND season >= '2122'", (comp,))
@@ -133,7 +133,7 @@ class Audit:
         shots = [r for r in rows if r[1] == "understat-shots"]
         self.check("accuracy", "big five: match xG from Understat shots (one definition for every season)",
                    len(shots), len(rows), [r[0] for r in rows if r[1] != "understat-shots"][-5:], expect_all=False,
-                   note="the rest wait for the Understat download")
+                   note="the rest wait for the Understat download" if getattr(self, "pending_understat", None) else "Understat has no shots for these")
         off = [f"{r[0]} page {r[4]:.2f}-{r[5]:.2f} vs shots {r[2]:.2f}-{r[3]:.2f}" for r in shots
                if r[4] is not None and (abs(r[2] - r[4]) > 0.1 or abs(r[3] - r[5]) > 0.1)]
         self.check("accuracy", "Understat page xG within 0.1 of the shot sum (old-model gap, fixed by using shots)",

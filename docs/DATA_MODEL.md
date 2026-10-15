@@ -92,8 +92,13 @@ goal events = players' goals, 11 starters, sane minutes, cross-source agreement,
 - one API club matching two of our names (a spelling split in a source: add an alias);
 - tracked clubs without an API-Football id.
 
-Last full build (2026-10-14): 61.7k matches, 990k player-match rows, 1.65M lineup rows, 645k events, 131k injury
-records; 5 disagreements (all awarded games), 2 possible duplicates (inside API-Football's own amateur-cup data),
-0 spelling splits.
+Last full build (2026-10-15, from the archives alone): 61.7k matches, 993k player-match rows, 234k shots, 1.65M
+lineup rows, 645k events, 131k injury records; Understat detail for every big-five match 2021-22 onwards except two
+gaps at the source (Holstein Kiel v Bochum 2025-02-09: listed without data, its page 'xG' a 2-2 placeholder; Rennes v
+Paris SG 2026-08-23: not listed) - both use API-Football xG; 5 disagreements (all awarded games), 2 possible duplicates
+(inside API-Football's own amateur-cup data), 0 spelling splits.
+
+Every `backfill` run also downloads new Understat matches (`detail --download`), so the current season's archive
+keeps up.
 
 A non-zero count is a data problem to look at, not something to ignore.
