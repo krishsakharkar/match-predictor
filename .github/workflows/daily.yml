@@ -5,6 +5,7 @@ name: predict
 # away: picks up confirmed lineups and re-predicts), or nothing.
 # Manual modes: daily | prekickoff | results | backtest | netcheck | afsample (API-Football parsing check)
 # | backfill (API-Football history for the team list -> data/history/api_football archives).
+# The gate also picks backfill once a week (Mondays 06-08 ET, see schedule.py).
 # Only runs on main commit data and deploy Pages; runs on other branches are read-only checks
 # (their results go to the job log and an artifact).
 on:
@@ -94,6 +95,7 @@ jobs:
           { echo '```'; cat out.json; echo '```'; du -sh data/history/api_football 2>/dev/null || true; } >> "$GITHUB_STEP_SUMMARY"
           if [ "${{ steps.gate.outputs.mode }}" = "backfill" ]; then
             { echo; echo "## Data audit"; python -m matchpredictor audit; } | tee -a "$GITHUB_STEP_SUMMARY"
+            date -u +%Y-%m-%dT%H:%M:%SZ > data/history/last_backfill.txt     # the gate's weekly clock
           fi
 
       - name: Run pipeline

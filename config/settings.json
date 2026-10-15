@@ -81,6 +81,12 @@
   },
   "schedule": {
     "daily_hour_et": 9,
+    "backfill_weekday": 0,
+    "backfill_hours_et": [
+      6,
+      8
+    ],
+    "backfill_every_days": 7,
     "prekickoff_window_minutes": [
       45,
       105

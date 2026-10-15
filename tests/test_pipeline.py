@@ -189,6 +189,29 @@ def test_gate(tmp_path):
     assert schedule.gate(datetime(2026, 10, 17, 20, 7, tzinfo=timezone.utc), tmp_path / "none.db") == "skip"
 
 
+def test_gate_weekly_backfill(tmp_path):
+    p = tmp_path / "m.db"
+    db.connect(p).close()
+    marker = tmp_path / "history" / "last_backfill.txt"
+    mon_7et = datetime(2026, 10, 19, 11, 7, tzinfo=timezone.utc)          # Monday 07:07 EDT
+    assert schedule.gate(mon_7et, p) == "backfill"                         # no marker yet: Mondays only
+    assert schedule.gate(datetime(2026, 10, 17, 11, 7, tzinfo=timezone.utc), p) == "skip"   # Saturday
+    assert schedule.gate(datetime(2026, 10, 19, 14, 7, tzinfo=timezone.utc), p) == "skip"   # Monday 10:07, after hours
+    marker.parent.mkdir()
+    marker.write_text("2026-10-19T11:20:00Z\n")
+    assert schedule.gate(datetime(2026, 10, 19, 12, 7, tzinfo=timezone.utc), p) == "skip"   # already ran today
+    # GitHub skipped every Monday tick: caught up in the same hours once the last run is 8+ days old
+    marker.write_text("2026-10-12T11:20:00Z\n")
+    assert schedule.gate(datetime(2026, 10, 20, 11, 7, tzinfo=timezone.utc), p) == "skip"   # Tue, 8 days not reached
+    assert schedule.gate(datetime(2026, 10, 21, 11, 7, tzinfo=timezone.utc), p) == "backfill"
+    # a kickoff soon wins: pre-kickoff refreshes are time-critical, the backfill can wait an hour
+    c = db.connect(p)
+    db.upsert_match(c, {"league": "EPL", "season": "2627", "date": "2026-10-19", "home": "A", "away": "B",
+                        "kickoff_utc": "2026-10-19T12:15:00Z", "status": "SCHEDULED"})
+    c.commit(); c.close()
+    assert schedule.gate(mon_7et, p) == "prekickoff"
+
+
 # ---------- offline end-to-end: synthetic league -> fit -> full prediction ----------
 
 def _synthetic_league(conn, seasons=("2425", "2526"), seed=0):
