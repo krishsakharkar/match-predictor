@@ -11,7 +11,7 @@ from datetime import timedelta
 
 import pandas as pd
 
-from . import MODEL_VERSION, config, db, history, match_markets, tracking
+from . import MODEL_VERSION, config, db, history, match_markets, model_data, tracking
 from .absences import match_absences
 from .ingest import api_football, football_data, odds_api
 from .models import team_elo
@@ -196,11 +196,12 @@ def raw_absences(conn, match_id: str) -> list[dict]:
 
 # ---------------------------------------------------------------- backfill
 
-def backfill_past(conn, notes: list[str], cfg: dict, now, book=None, elo_params=None) -> int:
+def backfill_past(conn, notes: list[str], cfg: dict, now, book=None, elo_params=None, *, model_df) -> int:
     """Predict shown matches of the last few days that kicked off before any live prediction existed.
 
     Each one is predicted as of its match day from earlier data only (no look-ahead) and stored with
-    retro=True: the site labels it 'backfilled' and live accuracy tracking ignores it."""
+    retro=True: the site labels it 'backfilled' and live accuracy tracking ignores it. The fixtures come from
+    match.db; the model reads model_df (the warehouse frame, model_data)."""
     days = config.settings()["display"]["days_back"]
     df = load_matches(conn)
     have = {r[0] for r in conn.execute("SELECT match_id FROM predictions")}
@@ -210,7 +211,7 @@ def backfill_past(conn, notes: list[str], cfg: dict, now, book=None, elo_params=
         (isinstance(r.kickoff_utc, str) and r.kickoff_utc < iso(now)) or r.status == "FT") for r in past.itertuples()]]
     n = 0
     for day, chunk in past.groupby("date"):
-        pred = Predictor(df, day.date(), elo_book=book, elo_params=elo_params,
+        pred = Predictor(model_df, day.date(), elo_book=book, elo_params=elo_params,
                          factors={f: cfg[f] for f in ALL_FACTORS}, xg_weight=cfg["xg_weight"] if cfg["xg"] else 0.0,
                          blend_weight=cfg["blend_weight"], rest_coef=cfg["rest_coef"], with_stats=True,
                          joint_blend_weight=cfg.get("joint_blend_weight"))
@@ -250,8 +251,10 @@ def run(conn, mode: str = "daily") -> dict:
         sync_results(conn, notes, ttl_minutes=50)
         conn.commit()
         from .backtest import current_config
-        book = team_elo.build(load_matches(conn))
-        backfill_past(conn, notes, current_config(conn), now, book if book else None, db.get_param(conn, "elo_params"))
+        mdf = model_data.prepare(notes)
+        book = team_elo.build(mdf)
+        backfill_past(conn, notes, current_config(conn), now, book if book else None, db.get_param(conn, "elo_params"),
+                      model_df=mdf)
         from .site import build
         build(conn, notes)
         return {"mode": mode, "notes": notes}
@@ -259,10 +262,6 @@ def run(conn, mode: str = "daily") -> dict:
     if mode == "daily":
         history.refresh(conn, cur, notes)
         sync_referees_fd(conn)
-        if config.settings().get("auto_tune", {}).get("enabled"):
-            from .backtest import rolling_tune      # re-optimise settings on the latest results
-            at = config.settings()["auto_tune"]
-            rolling_tune(conn, notes, days=at["window_days"], refit_days=at["refit_days"])
     sync_fixtures(conn, notes)
     sync_results(conn, notes)
     conn.commit()
@@ -274,13 +273,19 @@ def run(conn, mode: str = "daily") -> dict:
     df = load_matches(conn)
     upcoming = displayed_upcoming(df, now, hours=3 if mode == "prekickoff" else None)
 
-    book = team_elo.build(df)          # our own ratings from the stored results (ClubElo is unreachable)
+    # every model calculation reads the warehouse frame (model_data); match.db supplies the fixtures to predict
+    mdf = model_data.prepare(notes)
+    if mode == "daily" and config.settings().get("auto_tune", {}).get("enabled"):
+        from .backtest import rolling_tune          # re-optimise settings on the latest results
+        at = config.settings()["auto_tune"]
+        rolling_tune(conn, notes, days=at["window_days"], refit_days=at["refit_days"], df=mdf)
+    book = team_elo.build(mdf)         # our own ratings from the stored results (ClubElo is unreachable)
     book = book if book else None
     elo_params = None
     if book:
         elo_params = db.get_param(conn, "elo_params")
         if mode == "daily" or elo_params is None:
-            fitted = history.fit_elo_params(df, book)
+            fitted = history.fit_elo_params(mdf, book)
             if fitted:
                 elo_params = fitted
                 db.set_param(conn, "elo_params", fitted, iso(now))
@@ -288,7 +293,7 @@ def run(conn, mode: str = "daily") -> dict:
                      for lg in config.leagues()}
     from .backtest import current_config
     cfg = current_config(conn)                 # settings.json, overridden by the last adopted auto-tune
-    pred = Predictor(df, now.date(), elo_book=book, elo_params=elo_params, fixture_teams=fixture_teams,
+    pred = Predictor(mdf, now.date(), elo_book=book, elo_params=elo_params, fixture_teams=fixture_teams,
                      factors={f: cfg[f] for f in ALL_FACTORS}, xg_weight=cfg["xg_weight"] if cfg["xg"] else 0.0,
                      blend_weight=cfg["blend_weight"], rest_coef=cfg["rest_coef"], with_stats=True,
                      joint_blend_weight=cfg.get("joint_blend_weight"))
@@ -314,7 +319,7 @@ def run(conn, mode: str = "daily") -> dict:
         notes.append(f"No strength rating for {len(skipped)} fixtures (no league history or Elo rating): "
                      + ", ".join(skipped[:8]))
     conn.commit()
-    n_retro = backfill_past(conn, notes, cfg, now, book, elo_params) if mode == "daily" else 0
+    n_retro = backfill_past(conn, notes, cfg, now, book, elo_params, model_df=mdf) if mode == "daily" else 0
 
     from .site import build
     build(conn, notes)

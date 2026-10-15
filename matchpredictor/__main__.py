@@ -118,9 +118,10 @@ def main(argv=None):
             if args.refresh:
                 history.refresh(conn, config.season_code(date.today()), notes, backtest=True)
                 conn.commit()
-            rep = backtest.run(conn, season=args.season, notes=notes)
-            from . import backtest_markets
-            rep["markets"] = backtest_markets.run(conn, season=args.season)
+            from . import backtest_markets, model_data
+            mdf = model_data.prepare(notes)          # the model reads the warehouse, rebuilt from match.db now
+            rep = backtest.run(conn, season=args.season, notes=notes, df=mdf)
+            rep["markets"] = backtest_markets.run(conn, season=args.season, df=mdf)
             with open(args.out, "w") as f:
                 json.dump(rep, f, separators=(",", ":"), default=str)
             md = backtest.to_markdown(rep)

@@ -9,7 +9,7 @@ import pytest
 from matchpredictor import absences, config, db, site, tracking
 from matchpredictor.ingest import api_football, clubelo, understat
 from matchpredictor.models import dixon_coles as dc, elo, injuries
-from matchpredictor.predict import combine, referee_penalty_rates
+from matchpredictor.predict import combine, load_matches, referee_penalty_rates
 
 
 @pytest.fixture
@@ -384,7 +384,7 @@ def test_current_config_prefers_adopted_tune(conn):
 def test_rolling_tune_needs_enough_matches(conn):
     from matchpredictor import backtest
     notes = []
-    out = backtest.rolling_tune(conn, notes, today="2026-10-13")
+    out = backtest.rolling_tune(conn, notes, today="2026-10-13", df=load_matches(conn))
     assert out["adopted"] is False and "skipped" in notes[0]
 
 
@@ -785,3 +785,35 @@ def test_warehouse_aligns_clubs_on_busy_matchdays(tmp_path):
     assert w.execute("SELECT COUNT(*), COUNT(af_fixture_id) FROM matches").fetchone() == (8, 8)
     assert w.execute("SELECT af_team_id FROM teams WHERE team='CFR Cluj'").fetchone()[0] == 2246
     assert any(c.startswith("possible duplicate") and c.endswith(": 0") for c in out["checks"])
+
+
+def test_model_frame_comes_from_the_warehouse(tmp_path):
+    from matchpredictor import detail, model_data, warehouse
+    with pytest.raises(FileNotFoundError):                    # never a silent fallback to older data
+        model_data.load_frame(tmp_path / "missing.db")
+    main = db.connect(tmp_path / "m.db")
+    db.upsert_match(main, {"league": "EPL", "season": "2526", "date": "2025-09-21", "home": "Arsenal",
+                           "away": "Chelsea", "status": "FT", "fthg": 2, "ftag": 1, "hs": 15, "as_": 9, "hc": 6,
+                           "ac": 3, "hy": 2, "ay": 3, "hr": 0, "ar": 1, "referee": "M Oliver", "source": "football-data"})
+    main.commit()
+    d = detail.connect(tmp_path / "d.db")
+    d.executemany("INSERT INTO af_competitions VALUES (?,?,?,?,?,1,1,1,1,1,1)",
+                  [(39, 2025, "Premier League", "League", "England"), (45, 2025, "FA Cup", "Cup", "England")])
+    d.executemany("INSERT INTO af_teams (team_id, name, our_name, country) VALUES (?,?,?,?)",
+                  [(42, "Arsenal", "Arsenal", "England"), (49, "Chelsea", None, "England"), (1, "Bolton", None, "England")])
+    fx = "INSERT INTO af_fixtures (fixture_id, league_id, season, date, status, home_id, away_id, home, away, " \
+         "home_goals, away_goals, referee, pen_home, pen_away) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
+    d.executemany(fx, [(4, 39, 2025, "2025-09-21", "FT", 42, 49, "Arsenal", "Chelsea", 2, 1, "Michael Oliver", None, None),
+                       (5, 45, 2025, "2026-01-10", "PEN", 1, 42, "Bolton", "Arsenal", 1, 1, "D. Whitestone, England", 3, 4)])
+    ev = "INSERT INTO af_events (fixture_id, season, seq, team_id, minute, type, detail) VALUES (?,?,?,?,?,?,?)"
+    d.executemany(ev, [(4, 2025, 1, 42, 30, "Goal", "Penalty"), (4, 2025, 2, 49, 80, "Goal", "Missed Penalty"),
+                       (4, 2025, 3, 42, 60, "Goal", "Normal Goal"),
+                       (5, 2025, 1, 1, 50, "Goal", "Normal Goal"), (5, 2025, 2, 1, 120, "Goal", "Penalty")])   # shootout
+    d.commit()
+    warehouse.build(tmp_path / "m.db", tmp_path / "d.db", tmp_path / "w.db")
+    f = model_data.load_frame(tmp_path / "w.db").set_index("id")
+    epl = f.loc["EPL:2526:Arsenal:Chelsea"]
+    assert (epl.fthg, epl.ftag, epl.hs, epl.as_, epl.hc, epl.cards_a) == (2, 1, 15, 9, 6, 4)   # football-data stats
+    assert (epl.pens_home, epl.pens_away, epl.comp_type) == (1, 1, "league")      # awarded, scored or missed
+    cup = f[f.league == "FACUP"].iloc[0]                         # API-Football-only cup tie
+    assert cup.referee == "D Whitestone" and cup.pens_home == 0 and cup.comp_type == "cup"   # shootout not counted

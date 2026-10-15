@@ -141,4 +141,6 @@ class TeamElo:
 def build(matches: pd.DataFrame, params: dict | None = None) -> TeamElo:
     from .. import config
     types = {c: v.get("type") for c, v in config.competitions(enabled_only=False).items()}
+    if "comp_type" in matches:          # the warehouse frame also types API-Football competitions
+        types = {**dict(zip(matches.league, matches.comp_type.fillna("cup"))), **types}
     return TeamElo(matches, types, params or config.settings()["elo"].get("own"))

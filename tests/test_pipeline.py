@@ -374,7 +374,7 @@ def test_backfill_past_predicts_from_earlier_data_only(conn):
     when = datetime.fromisoformat(rows[-1]["date"]).replace(tzinfo=timezone.utc) + timedelta(days=1)
     cfg = {"xg_weight": 0.0, "blend_weight": 1.0, "rest_coef": 0.0, "fresh_k": 0,
            **{f: False for f in ("xg", "elo", "rest", "injuries", "referee_penalties")}}
-    n = pipeline.backfill_past(conn, [], cfg, when)
+    n = pipeline.backfill_past(conn, [], cfg, when, model_df=load_matches(conn))
     assert n > 0
     got = conn.execute("SELECT payload FROM predictions").fetchall()
     assert all(json.loads(r["payload"])["retro"] for r in got)

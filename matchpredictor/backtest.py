@@ -21,7 +21,7 @@ from . import config, tracking, value
 from .absences import match_absences
 from .history import fit_elo_params
 from .models import dixon_coles as dc, elo as elo_model, markets
-from .predict import ALL_FACTORS, Predictor, combine, fit_league, load_matches
+from .predict import ALL_FACTORS, Predictor, combine, fit_league
 
 log = logging.getLogger(__name__)
 KEEP_THRESHOLD = 0.001          # minimum log-loss improvement for a factor to stay in the model
@@ -289,10 +289,12 @@ def season_label(s: str) -> str:
     return f"20{s[:2]}-{s[2:]}"
 
 
-def run(conn, season: str | None = None, notes: list[str] | None = None, refit_days: int = 7) -> dict:
+def run(conn, season: str | None = None, notes: list[str] | None = None, refit_days: int = 7, df=None) -> dict:
+    """df: the model frame (model_data.load_frame(): the warehouse). Tests pass a match.db frame."""
+    from . import model_data
     from .models import team_elo
     notes = notes if notes is not None else []
-    df = load_matches(conn)
+    df = model_data.load_frame() if df is None else df
     if season is None:
         season = config.previous_seasons(config.season_code(pd.Timestamp.now()), 1)[0]
     tune_season = config.previous_seasons(season, 1)[0]
@@ -456,7 +458,7 @@ def current_config(conn) -> dict:
     return cfg
 
 
-def rolling_tune(conn, notes: list[str], days: int = 365, refit_days: int = 14, today=None) -> dict:
+def rolling_tune(conn, notes: list[str], days: int = 365, refit_days: int = 14, today=None, df=None) -> dict:
     """Re-tune xG weight, Elo blend, rest coefficient and injuries on the last `days` of league matches
     (walk-forward, refit every `refit_days`), and adopt the result only if it beats the configuration
     in use on that same window by more than KEEP_THRESHOLD. Ratings themselves are refitted on every run."""
@@ -465,7 +467,9 @@ def rolling_tune(conn, notes: list[str], days: int = 365, refit_days: int = 14, 
     from .models import team_elo
     today = pd.Timestamp(today or now_utc().date())
     start = today - pd.Timedelta(days=days)
-    df = load_matches(conn)
+    if df is None:
+        from . import model_data
+        df = model_data.load_frame()
     book = team_elo.build(df)
     book = book if book else None
     s = config.settings()

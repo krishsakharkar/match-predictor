@@ -59,6 +59,7 @@ CREATE TABLE lineups (match_id TEXT, team TEXT, player_id TEXT, player TEXT, sta
 CREATE TABLE shots (match_id TEXT, team TEXT, shot_id INTEGER PRIMARY KEY, minute INTEGER, player_id TEXT,
     player TEXT, result TEXT, x REAL, y REAL, xg REAL, situation TEXT, shot_type TEXT, assisted_by TEXT,
     last_action TEXT);
+CREATE INDEX ix_shots_match ON shots (match_id, team);
 CREATE TABLE events (match_id TEXT, seq INTEGER, team TEXT, minute INTEGER, extra INTEGER, type TEXT, detail TEXT,
     player_id TEXT, player TEXT, assist_id TEXT, assist TEXT, PRIMARY KEY (match_id, seq));
 CREATE TABLE injuries (match_id TEXT, team TEXT, player_id TEXT, player TEXT, type TEXT, reason TEXT,
