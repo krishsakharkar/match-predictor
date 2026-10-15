@@ -3,12 +3,12 @@
 Expected goals for a match come from up to two strength sources plus context factors:
 
   * Dixon-Coles league model (per domestic league), fitted on a blend of goals and Understat xG.
-  * ClubElo -> goals model, which works across leagues and competitions.
+  * Elo (our own ratings, models/team_elo.py) -> goals model, which works across leagues and competitions.
 
   same-league match (league game or a domestic cup between two clubs of that league):
         lambda = blend(DC, Elo, w)                        geometric blend, w tuned in the backtest
   cross-league match (Champions League, cups vs. other leagues' clubs):
-        each team's DC strength is mapped onto the Elo scale, blended with its ClubElo rating,
+        each team's DC strength is mapped onto the Elo scale, blended with its Elo rating,
         then the Elo goals model is applied (with that competition's home advantage)
   then: rest days, absences (injuries/suspensions/lineups), referee penalty rate.
 
@@ -206,11 +206,12 @@ class Predictor:
     """Everything needed to predict any fixture as of one date."""
     df: pd.DataFrame
     as_of: date
-    elo_book: object | None = None                  # ingest.clubelo.EloBook
+    elo_book: object | None = None                  # models.team_elo.TeamElo (or ingest.clubelo.EloBook)
     elo_params: dict | None = None
     factors: dict = field(default_factory=dict)     # factor -> bool (missing = config default)
     xg_weight: float | None = None
     blend_weight: float | None = None               # weight on DC in the DC/Elo blend
+    joint_blend_weight: float | None = None         # weight on the joint model in the joint/Elo blend (Europe)
     rest_coef: float | None = None
     models: dict | None = None                      # league -> LeagueModel (pre-fitted, optional)
     fixture_teams: dict = field(default_factory=dict)
@@ -223,6 +224,8 @@ class Predictor:
             self.xg_weight = s["model"]["xg_weight"] if self.factors["xg"] else 0.0
         if self.blend_weight is None:
             self.blend_weight = s["elo"]["blend_weight_dc"]
+        if self.joint_blend_weight is None:
+            self.joint_blend_weight = s["elo"].get("blend_weight_joint", 1.0)
         if self.rest_coef is None:
             self.rest_coef = s["rest"]["coef"]
         if self.elo_params is None:
@@ -328,7 +331,8 @@ class Predictor:
 
     def combine(self, comp_info: dict, absences: dict | None = None, referee: str | None = None) -> dict | None:
         return combine(comp_info, factors=self.factors, blend_weight=self.blend_weight, rest_coef=self.rest_coef,
-                       elo_params=self.elo_params, absences=absences, referee_delta=self.referee_delta(referee))
+                       elo_params=self.elo_params, absences=absences, referee_delta=self.referee_delta(referee),
+                       joint_blend_weight=self.joint_blend_weight)
 
     def predict(self, comp: str, home: str, away: str, day: str, absences: dict | None = None,
                 referee: str | None = None) -> dict | None:
@@ -358,13 +362,16 @@ def shrink(lam: float, mu: float, s: float) -> tuple[float, float]:
 
 def combine(info: dict, *, factors: dict, blend_weight: float, rest_coef: float, elo_params: dict,
             absences: dict | None = None, referee_delta: float | None = None,
-            cross_shrink: dict | None = None) -> dict | None:
+            cross_shrink: dict | None = None, joint_blend_weight: float | None = None) -> dict | None:
     """Blend strength sources and apply context factors (shared by the live pipeline and the backtest).
 
     info: Predictor.components() output. Returns {"lam", "mu", "rho", "source", "applied"} or None when
-    no strength source is available for the fixture.
+    no strength source is available for the fixture. blend_weight = weight on Dixon-Coles against Elo in league
+    games (only with factors["elo"]); joint_blend_weight = weight on the joint model against Elo in European and
+    cross-league games (tuned separately on the previous European season; 1.0 = no Elo).
     """
     w = blend_weight
+    wj = config.settings()["elo"].get("blend_weight_joint", 1.0) if joint_blend_weight is None else joint_blend_weight
     dc_ga, elo_ga = info["dc"], info["elo"]
     if dc_ga and elo_ga and factors["elo"]:
         lam, mu = elo_model.blend(dc_ga[0], elo_ga[0], w), elo_model.blend(dc_ga[1], elo_ga[1], w)
@@ -374,8 +381,8 @@ def combine(info: dict, *, factors: dict, blend_weight: float, rest_coef: float,
     elif info.get("joint"):
         lam, mu = info["joint"]
         source = "Joint leagues + Europe"
-        if elo_ga and factors["elo"]:
-            lam, mu = elo_model.blend(lam, elo_ga[0], w), elo_model.blend(mu, elo_ga[1], w)
+        if elo_ga and wj < 1.0:
+            lam, mu = elo_model.blend(lam, elo_ga[0], wj), elo_model.blend(mu, elo_ga[1], wj)
             source += " + Elo"
         cs = config.settings()["model"].get("cross_league_shrink", {}) if cross_shrink is None else cross_shrink
         lam, mu = shrink(lam, mu, cs.get(info.get("category"), 0.0))

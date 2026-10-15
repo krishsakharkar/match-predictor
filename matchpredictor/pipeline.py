@@ -13,7 +13,8 @@ import pandas as pd
 
 from . import MODEL_VERSION, config, db, history, match_markets, tracking
 from .absences import match_absences
-from .ingest import api_football, clubelo, football_data, odds_api
+from .ingest import api_football, football_data, odds_api
+from .models import team_elo
 from .ingest.http_cache import iso, now_utc, parse_iso
 from .predict import ALL_FACTORS, Predictor, load_matches
 
@@ -211,7 +212,8 @@ def backfill_past(conn, notes: list[str], cfg: dict, now, book=None, elo_params=
     for day, chunk in past.groupby("date"):
         pred = Predictor(df, day.date(), elo_book=book, elo_params=elo_params,
                          factors={f: cfg[f] for f in ALL_FACTORS}, xg_weight=cfg["xg_weight"] if cfg["xg"] else 0.0,
-                         blend_weight=cfg["blend_weight"], rest_coef=cfg["rest_coef"], with_stats=True)
+                         blend_weight=cfg["blend_weight"], rest_coef=cfg["rest_coef"], with_stats=True,
+                         joint_blend_weight=cfg.get("joint_blend_weight"))
         for m in chunk.itertuples():
             ref = m.referee if isinstance(m.referee, str) else None
             d = day.strftime("%Y-%m-%d")
@@ -248,7 +250,7 @@ def run(conn, mode: str = "daily") -> dict:
         sync_results(conn, notes, ttl_minutes=50)
         conn.commit()
         from .backtest import current_config
-        book = clubelo.EloBook(conn)
+        book = team_elo.build(load_matches(conn))
         backfill_past(conn, notes, current_config(conn), now, book if book else None, db.get_param(conn, "elo_params"))
         from .site import build
         build(conn, notes)
@@ -272,7 +274,7 @@ def run(conn, mode: str = "daily") -> dict:
     df = load_matches(conn)
     upcoming = displayed_upcoming(df, now, hours=3 if mode == "prekickoff" else None)
 
-    book = clubelo.EloBook(conn)
+    book = team_elo.build(df)          # our own ratings from the stored results (ClubElo is unreachable)
     book = book if book else None
     elo_params = None
     if book:
@@ -288,7 +290,8 @@ def run(conn, mode: str = "daily") -> dict:
     cfg = current_config(conn)                 # settings.json, overridden by the last adopted auto-tune
     pred = Predictor(df, now.date(), elo_book=book, elo_params=elo_params, fixture_teams=fixture_teams,
                      factors={f: cfg[f] for f in ALL_FACTORS}, xg_weight=cfg["xg_weight"] if cfg["xg"] else 0.0,
-                     blend_weight=cfg["blend_weight"], rest_coef=cfg["rest_coef"], with_stats=True)
+                     blend_weight=cfg["blend_weight"], rest_coef=cfg["rest_coef"], with_stats=True,
+                     joint_blend_weight=cfg.get("joint_blend_weight"))
 
     n_pred, skipped = 0, []
     for m in upcoming.itertuples():
@@ -308,7 +311,7 @@ def run(conn, mode: str = "daily") -> dict:
         db.save_prediction(conn, m.id, iso(now), MODEL_VERSION, p)
         n_pred += 1
     if skipped:
-        notes.append(f"No strength rating for {len(skipped)} fixtures (no league history or ClubElo rating): "
+        notes.append(f"No strength rating for {len(skipped)} fixtures (no league history or Elo rating): "
                      + ", ".join(skipped[:8]))
     conn.commit()
     n_retro = backfill_past(conn, notes, cfg, now, book, elo_params) if mode == "daily" else 0

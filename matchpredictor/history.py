@@ -216,6 +216,6 @@ def refresh(conn, current: str, notes: list[str], backtest: bool = False) -> dic
     conn.commit()
     if backtest:      # first, so Champions League clubs get Elo history too
         out["api_football"] = backfill_api_football(conn, notes)
-    if elo_snapshots(conn, current, notes):
+    if config.settings()["elo"].get("source") == "clubelo" and elo_snapshots(conn, current, notes):
         out["elo_history_rows"] = elo_backfill(conn, current, notes, force=False)
     return out

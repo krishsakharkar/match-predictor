@@ -276,3 +276,61 @@ def test_player_props_bounds_and_out_status():
     out2 = props.player_props(players, 1.8, 5.5, 70, 500, 180, 38 * 90, statuses={"Striker": "out"})
     striker = [r for r in out2 if r["player"] == "Striker"][0]
     assert striker["anytime_scorer"] == 0.0 and striker["anytime_scorer_fair"] is None
+
+
+# ---------- own Elo ratings (models/team_elo.py) ----------
+
+def _elo_frame(rows):
+    import pandas as pd
+    return pd.DataFrame([{"league": lg, "date": pd.Timestamp(d), "home": h, "away": a, "fthg": hg, "ftag": ag,
+                          "status": "FT"} for lg, d, h, a, hg, ag in rows])
+
+
+def test_team_elo_point_in_time_and_symmetry():
+    from matchpredictor.models import team_elo
+    types = {"EPL": "league", "UCL": "europe"}
+    df = _elo_frame([("EPL", "2024-08-10", "A", "B", 3, 0), ("EPL", "2024-08-17", "B", "A", 1, 1)])
+    b = team_elo.TeamElo(df, types, {"k": 20, "home_adv": 0, "k_league": 0})
+    assert b.team_rating("A", "2024-08-10") is None           # no match before that day: no rating yet
+    a1 = b.team_rating("A", "2024-08-11")
+    assert a1 > 1500 and abs((a1 - 1500) + (b.team_rating("B", "2024-08-11") - 1500)) < 1e-9   # zero-sum
+    assert a1 - 1500 == 20 * team_elo.goal_multiplier(3) * 0.5  # E = 0.5 with no home advantage
+    assert b.team_rating("C", "2024-09-01") is None            # never seen -> no rating, never a guess
+    assert b.last_match("A", "2024-08-17") == "2024-08-10" and b.last_match("A", "2024-08-18") == "2024-08-17"
+
+
+def test_team_elo_league_term_moves_whole_leagues():
+    from matchpredictor.models import team_elo
+    types = {"EPL": "league", "POR": "extra", "UCL": "europe"}
+    rows = [("EPL", "2024-08-10", "E1", "E2", 1, 1), ("POR", "2024-08-10", "P1", "P2", 1, 1),
+            ("UCL", "2024-09-18", "P1", "E1", 0, 3)]           # an English club wins in Portugal
+    b = team_elo.TeamElo(_elo_frame(rows), types, {"k": 20, "k_europe": 30, "k_league": 10, "home_adv": 0})
+    # E2 never played in Europe, but its league did: it moves up, P2 moves down
+    assert b.team_rating("E2", "2024-09-19") > b.team_rating("E2", "2024-09-18")
+    assert b.team_rating("P2", "2024-09-19") < b.team_rating("P2", "2024-09-18")
+    assert b.league_ratings["EPL"] == -b.league_ratings["POR"] > 0
+
+
+def test_team_elo_promoted_club_starts_low():
+    from matchpredictor.models import team_elo
+    types = {"EPL": "league"}
+    rows = [("EPL", f"2024-0{m}-0{d}", h, a, hg, ag) for m, d, (h, a, hg, ag) in
+            zip([8] * 6 + [9] * 6, list(range(1, 7)) * 2,
+                [("A", "B", 2, 0), ("C", "D", 1, 0), ("E", "F", 0, 1), ("B", "C", 2, 2), ("D", "E", 3, 1),
+                 ("F", "A", 0, 0)] * 2)]
+    rows.append(("EPL", "2025-08-15", "New", "A", 0, 0))
+    b = team_elo.TeamElo(_elo_frame(rows), types, {"promoted_quantile": 0.15})
+    others = [b.team_rating(t, "2025-08-15") for t in "ABCDEF"]
+    assert b.team_rating("New", "2025-08-16") < sorted(others)[2]   # starts in the bottom of the league
+
+
+def test_joint_elo_blend_uses_its_own_weight():
+    from matchpredictor.predict import combine
+    info = {"dc": None, "joint": (2.0, 1.0), "elo": (1.0, 1.0), "elo_ratings": (1800, 1700), "dc_elo": None,
+            "rho": 0.0, "rest": (None, None), "category": "mixed"}
+    kw = dict(factors={"xg": True, "elo": False, "rest": False, "injuries": False, "referee_penalties": False},
+              blend_weight=1.0, rest_coef=0.0, elo_params={}, cross_shrink={})
+    alone = combine(info, joint_blend_weight=1.0, **kw)
+    mixed = combine(info, joint_blend_weight=0.5, **kw)          # league Elo factor off, Europe blend on
+    assert (alone["lam"], alone["mu"]) == (2.0, 1.0) and "Elo" not in alone["source"]
+    assert abs(mixed["lam"] - 2 ** 0.5) < 1e-9 and mixed["source"].endswith("+ Elo")

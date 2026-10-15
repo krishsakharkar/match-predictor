@@ -72,6 +72,8 @@ matchpredictor/
   models/
     dixon_coles.py    DC fit; Poisson targets may be a goals/xG blend, tau uses real scores
     elo.py            Elo→goals (per-competition HFA), geometric blend, DC→Elo map, rest feature, 1-D fits
+    team_elo.py       our own club Elo from the stored results (replaced ClubElo, unreachable since 2026-10-13):
+                      rating = own + league term; European games move whole leagues (k_league); point-in-time
     injuries.py       absence_effect(): npxG/xA/goal shares, first-choice GK, regular defenders
     markets.py        score matrix → 1X2, scorelines (top 3), totals, BTTS
   predict.py       Predictor.components() (raw sources) + combine() (blend + factors) → payload
@@ -106,9 +108,10 @@ site/  index.html (all pages as tabs), results/corners/cards/shots/players.html 
    European games link the leagues. Results-only extra leagues (`type: "extra"`: POR, NED, TUR, …) are stored
    but kept out of the fit (`model.joint_extra_leagues=false`: they worsened 2024-25 UCL log loss 0.915 → 0.924).
    `model.cross_league_shrink` then calibrates confidence by matchup category (top / mixed / outside). Unseen clubs get the mean rating of Europe-only clubs and are
-   flagged `thin_data`. If ClubElo is available and `factors.elo` is on, Elo is blended in; without the
-   joint model, ClubElo alone (DC strength mapped onto the Elo scale) is the fallback. No rating at all
-   → no prediction (never a guess).
+   flagged `thin_data`. Our own Elo (`models/team_elo.py`) is blended in with its own weight
+   `elo.blend_weight_joint` (0.5: tuned on UCL 2024-25, UCL 2025-26 log loss 0.928 → 0.916); in league games
+   the DC/Elo blend (`factors.elo`) stays off (+0.0002 only). Without the joint model, Elo alone (DC strength
+   mapped onto the Elo scale) is the fallback. No rating at all → no prediction (never a guess).
 3. Factors (each only if `settings.factors[...]` is on): rest-day difference, absences (attack ×,
    opponent ×), referee penalty-rate shift. Confirmed lineups (~1 h before kickoff) replace injury lists.
 
@@ -131,7 +134,7 @@ site/  index.html (all pages as tabs), results/corners/cards/shots/players.html 
   The client turns itself off for the run on the first plan/quota error.
 - Odds API: fixtures via `/events` are free; `/scores` costs 2 credits per competition-day, only called
   when a shown match finished in the last 3 days. Odds polling is off (`odds_api.fetch_odds=false`).
-- ClubElo is a free hobby service: history refreshed at most monthly, 0.3 s pause, disk-cached.
+- ClubElo (free hobby service) is no longer used (`elo.source: "own"`); its client stays for `elo.source: "clubelo"`.
 
 ## Conventions
 - Tunables live in `config/settings.json`; don't hard-code thresholds.
