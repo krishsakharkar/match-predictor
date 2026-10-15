@@ -109,7 +109,7 @@ def evaluate(rows: list[dict], cfg: dict) -> list[dict]:
             info["dc_elo"] = None
         g = combine(info, factors=factors, blend_weight=cfg.get("blend_weight", 1.0),
                     rest_coef=cfg.get("rest_coef", 0.0), elo_params=cfg["elo_params"],
-                    cross_shrink=cfg.get("cross_shrink"),
+                    cross_shrink=cfg.get("cross_shrink"), joint_blend_weight=cfg.get("joint_blend_weight", 1.0),
                     absences=r["abs"].get(cfg.get("fresh_k", 0)) if factors["injuries"] else None)
         if g is None:
             continue
@@ -179,7 +179,7 @@ def tune(rows: list[dict], base: dict, notes: list[str]) -> tuple[dict, dict]:
                             "gain": round(gain, 5), "kept": keep, "blend_weight_dc": best_w})
         cfg["elo"], cfg["blend_weight"] = keep, (best_w if keep else 1.0)
     else:
-        notes.append("Backtest: ClubElo ratings missing for most matches - Elo factor not evaluated")
+        notes.append("Backtest: Elo ratings missing for most matches - Elo factor not evaluated")
     # rest days: fit the coefficient on the current best model's expected goals
     cur = evaluate(rows, cfg)
     s = config.settings()["rest"]
@@ -218,7 +218,7 @@ def tune(rows: list[dict], base: dict, notes: list[str]) -> tuple[dict, dict]:
 
 # ---------------------------------------------------------------- report
 
-FACTOR_LABELS = {"xg": "xG (Understat)", "elo": "ClubElo blend", "rest": "Rest days", "injuries": "Injuries"}
+FACTOR_LABELS = {"xg": "xG (Understat)", "elo": "Elo blend (own ratings)", "rest": "Rest days", "injuries": "Injuries"}
 
 
 def ablation(rows: list[dict], selected: dict, base: dict, tuned: dict) -> list[dict]:
@@ -290,13 +290,13 @@ def season_label(s: str) -> str:
 
 
 def run(conn, season: str | None = None, notes: list[str] | None = None, refit_days: int = 7) -> dict:
-    from .ingest.clubelo import EloBook
+    from .models import team_elo
     notes = notes if notes is not None else []
     df = load_matches(conn)
     if season is None:
         season = config.previous_seasons(config.season_code(pd.Timestamp.now()), 1)[0]
     tune_season = config.previous_seasons(season, 1)[0]
-    book = EloBook(conn)
+    book = team_elo.build(df)          # point-in-time: a rating on day d uses only matches before d
     book = book if book else None
     s = config.settings()
     has_xg = "xg_home" in df and df.xg_home.notna().any()
@@ -355,17 +355,28 @@ def run(conn, season: str | None = None, notes: list[str] | None = None, refit_d
         if urows:
             ucfg = dict(selected, elo_params=ep)
             prior = [x for x in ucl_seasons if x < us]
-            shrink = {}
-            if prior:     # calibrate cross-league confidence on the previous European season
+            shrink, jlog, wj = {}, {}, 1.0
+            if prior:     # tune the joint/Elo blend and cross-league confidence on the previous European season
                 prow = collect_europe(df, book, "UCL", prior[-1], selected["xg_weight"],
                                       elo_params_before(prior[-1]), refit_days)
-                shrink = tune_shrink(prow, dict(selected, elo_params=elo_params_before(prior[-1])))
-            ucfg["cross_shrink"] = shrink
+                pcfg = dict(selected, elo_params=elo_params_before(prior[-1]))
+                if book and np.mean([r["info"]["elo"] is not None for r in prow]) > 0.8:
+                    jl = {w: ll(evaluate(prow, dict(pcfg, joint_blend_weight=w)))
+                          for w in config.settings()["elo"]["blend_weight_grid"]}
+                    best = min(jl, key=jl.get)
+                    keep = jl[1.0] - jl[best] > KEEP_THRESHOLD if 1.0 in jl else False
+                    wj = best if keep else 1.0
+                    jlog = {"season": prior[-1], "log_loss": {str(k): round(v, 5) for k, v in jl.items()},
+                            "gain": round(jl.get(1.0, jl[best]) - jl[best], 5), "kept": bool(keep),
+                            "blend_weight_joint": wj}
+                shrink = tune_shrink(prow, dict(pcfg, joint_blend_weight=wj))
+            ucfg["cross_shrink"], ucfg["joint_blend_weight"] = shrink, wj
             raw = summary_metrics(score(evaluate(urows, dict(ucfg, cross_shrink={}))))
             rep["ucl"] = {
                 "season": us, "season_label": season_label(us),
-                "method": "Joint leagues + Europe model" + (" blended with Elo" if book else ""),
-                "cross_league_shrink": shrink, "uncalibrated": raw,
+                "method": "Joint leagues + Europe model" + (" blended with Elo" if wj < 1.0 else ""),
+                "joint_elo_blend": jlog, "cross_league_shrink": shrink, "uncalibrated": raw,
+                "joint_only": summary_metrics(score(evaluate(urows, dict(ucfg, joint_blend_weight=1.0)))),
                 "by_category": {c: summary_metrics(score(evaluate([r for r in urows if r["info"].get("category") == c], ucfg)))
                                 for c in ("top", "mixed", "outside")},
                 "selected": summary_metrics(score(evaluate(urows, ucfg))),
@@ -387,6 +398,7 @@ def run(conn, season: str | None = None, notes: list[str] | None = None, refit_d
         "rest.coef": selected.get("rest_coef", 0.0), "elo.default_params": ep_test,
         "injuries.fresh_absence_matches": selected.get("fresh_k", 0),
         "model.cross_league_shrink": (rep.get("ucl") or {}).get("cross_league_shrink"),
+        "elo.blend_weight_joint": ((rep.get("ucl") or {}).get("joint_elo_blend") or {}).get("blend_weight_joint", 1.0),
     }
     return rep
 
@@ -434,7 +446,8 @@ def current_config(conn) -> dict:
     from . import db
     s = config.settings()
     cfg = {"xg_weight": s["model"]["xg_weight"] if s["factors"].get("xg") else 0.0,
-           "blend_weight": s["elo"]["blend_weight_dc"], "rest_coef": s["rest"]["coef"],
+           "blend_weight": s["elo"]["blend_weight_dc"], "joint_blend_weight": s["elo"].get("blend_weight_joint", 1.0),
+           "rest_coef": s["rest"]["coef"],
            "fresh_k": s["injuries"].get("fresh_absence_matches") or 0,
            **{f: bool(s["factors"].get(f)) for f in ALL_FACTORS}}
     tuned = db.get_param(conn, "tuned")
@@ -448,12 +461,12 @@ def rolling_tune(conn, notes: list[str], days: int = 365, refit_days: int = 14, 
     (walk-forward, refit every `refit_days`), and adopt the result only if it beats the configuration
     in use on that same window by more than KEEP_THRESHOLD. Ratings themselves are refitted on every run."""
     from . import db
-    from .ingest.clubelo import EloBook
     from .ingest.http_cache import iso, now_utc
+    from .models import team_elo
     today = pd.Timestamp(today or now_utc().date())
     start = today - pd.Timedelta(days=days)
     df = load_matches(conn)
-    book = EloBook(conn)
+    book = team_elo.build(df)
     book = book if book else None
     s = config.settings()
     has_xg = "xg_home" in df and df[df.date >= start].xg_home.notna().any()

@@ -399,13 +399,13 @@ def test_shrink_moves_toward_or_away_from_even():
 
 
 def test_combine_applies_cross_league_shrink_by_category():
-    info = dict(INFO, dc=None, joint=(2.0, 1.0), category="top")
+    info = dict(INFO, dc=None, joint=(2.0, 1.0), category="top")      # Elo blend off: shrink alone
     wide = combine(info, factors=NO, blend_weight=0.5, rest_coef=0, elo_params=PARAMS,
-                   cross_shrink={"top": -0.3})
-    plain = combine(info, factors=NO, blend_weight=0.5, rest_coef=0, elo_params=PARAMS, cross_shrink={})
+                   cross_shrink={"top": -0.3}, joint_blend_weight=1.0)
+    plain = combine(info, factors=NO, blend_weight=0.5, rest_coef=0, elo_params=PARAMS, cross_shrink={}, joint_blend_weight=1.0)
     assert plain["lam"] == 2.0 and wide["lam"] > 2.0
     mixed = combine(dict(info, category="mixed"), factors=NO, blend_weight=0.5, rest_coef=0, elo_params=PARAMS,
-                    cross_shrink={"top": -0.3})
+                    cross_shrink={"top": -0.3}, joint_blend_weight=1.0)
     assert mixed["lam"] == 2.0
 
 
