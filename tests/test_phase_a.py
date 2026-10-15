@@ -499,9 +499,12 @@ def test_understat_match_without_data_is_skipped(tmp_path, monkeypatch):
     db.upsert_match(main, {"league": "BUNDESLIGA", "season": "2425", "date": "2025-02-09", "home": "Holstein Kiel",
                            "away": "Bochum", "status": "FT", "fthg": 2, "ftag": 2, "understat_id": "27930",
                            "source": "understat"})
-    notes = []
-    out = detail.sync_understat(main, detail.connect(tmp_path / "d.db"), ["2425"], notes, pause=0)
-    assert out["empty"] == 1 and out["stored"] == 0 and "27930" in notes[0]
+    notes, d = [], detail.connect(tmp_path / "d.db")
+    out = detail.sync_understat(main, d, ["2425"], notes, pause=0)
+    assert out["empty"] == 1 and "27930" in notes[0]
+    assert d.execute("SELECT source FROM detail_matches").fetchone()[0] == "understat-empty"
+    assert d.execute("SELECT COUNT(*) FROM player_matches").fetchone()[0] == 0
+    assert detail.sync_understat(main, d, ["2425"], [], pause=0)["todo"] == 0      # not fetched again
 
 
 def test_detail_archive_round_trip(tmp_path, monkeypatch):

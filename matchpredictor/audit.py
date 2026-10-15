@@ -66,9 +66,17 @@ class Audit:
         nox = [r[0] for r in big if not r[1]]
         self.check("completeness", "big five: match xG present", len(big) - len(nox), len(big), nox)
         us = {r[0] for r in self.q("SELECT DISTINCT match_id FROM d.player_matches")}
-        und = [r[0] for r in big if r[0] not in us]
-        self.check("completeness", "big five: Understat player rows downloaded", len(big) - len(und), len(big), und[-5:],
+        # gaps at the source: Understat lists the match without any data, or doesn't list it at all
+        gap = {r[0] for r in self.q("SELECT match_id FROM d.detail_matches WHERE source='understat-empty'")} | \
+            {r[0] for r in self.q(f"SELECT match_id FROM matches WHERE status='FT' AND comp IN ({ph5}) AND season >= '2122' "
+                                  "AND understat_id IS NULL", BIG5)}
+        und = [r[0] for r in big if r[0] not in us and r[0] not in gap]
+        gaps = sorted(m for m in gap if m not in us)
+        self.check("completeness", "big five: Understat player rows downloaded (where Understat has them)",
+                   len(big) - len(gaps) - len(und), len(big) - len(gaps), und[-5:],
                    note="download still running" if und else "")
+        self.check("completeness", "big five: matches Understat has no player data for (gap at the source; xG from "
+                   "API-Football)", len(gaps), 0, gaps, expect_all=False)
         # competitions shown in full: every finished match has a result
         for comp in ("EPL", "UCL"):
             rows = self.q("SELECT match_id, home_goals FROM matches WHERE comp=? AND status='FT' AND season >= '2122'", (comp,))
