@@ -2,8 +2,9 @@
 
     daily       -> at the configured hour in US Eastern time (09:xx ET)
     prekickoff  -> a kickoff falls 45-105 minutes from now (hourly ticks hit each kickoff once)
-    backfill    -> weekly data refresh (API-Football current season + new Understat matches): Mondays in the
-                   backfill hours (06:00-08:59 ET); if GitHub skipped those ticks, the same hours on any later day
+    backfill    -> weekly data refresh (API-Football current season + new Understat matches): the first tick on
+                   a Monday from 06:00 to 22:59 ET (GitHub's hourly cron skipped every 02-09 ET tick on 2026-10-19,
+                   so a short window is missed); if a whole Monday is missed, the same hours on any later day
                    once the last backfill (data/history/last_backfill.txt) is 8+ days old
     results     -> a shown match kicked off 2-12 hours ago and has no result yet (GitHub often skips
                    scheduled ticks for hours, so the window is wide; /scores responses are cached)

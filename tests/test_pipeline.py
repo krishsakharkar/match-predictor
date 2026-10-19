@@ -196,7 +196,8 @@ def test_gate_weekly_backfill(tmp_path):
     mon_7et = datetime(2026, 10, 19, 11, 7, tzinfo=timezone.utc)          # Monday 07:07 EDT
     assert schedule.gate(mon_7et, p) == "backfill"                         # no marker yet: Mondays only
     assert schedule.gate(datetime(2026, 10, 17, 11, 7, tzinfo=timezone.utc), p) == "skip"   # Saturday
-    assert schedule.gate(datetime(2026, 10, 19, 14, 7, tzinfo=timezone.utc), p) == "skip"   # Monday 10:07, after hours
+    assert schedule.gate(datetime(2026, 10, 19, 14, 7, tzinfo=timezone.utc), p) == "backfill"   # Monday 10:07 ET too
+    assert schedule.gate(datetime(2026, 10, 20, 3, 7, tzinfo=timezone.utc), p) == "skip"   # Monday 23:07 ET: after hours
     marker.parent.mkdir()
     marker.write_text("2026-10-19T11:20:00Z\n")
     assert schedule.gate(datetime(2026, 10, 19, 12, 7, tzinfo=timezone.utc), p) == "skip"   # already ran today
