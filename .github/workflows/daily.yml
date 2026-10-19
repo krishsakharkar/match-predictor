@@ -5,7 +5,7 @@ name: predict
 # away: picks up confirmed lineups and re-predicts), or nothing.
 # Manual modes: daily | prekickoff | results | backtest | netcheck | afsample (API-Football parsing check)
 # | backfill (API-Football history for the team list -> data/history/api_football archives).
-# The gate also picks backfill once a week (Mondays 06-08 ET, see schedule.py).
+# The gate also picks backfill once a week (first Monday tick from 06:00 ET, see schedule.py).
 # Only runs on main commit data and deploy Pages; runs on other branches are read-only checks
 # (their results go to the job log and an artifact).
 on:

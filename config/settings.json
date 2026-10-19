@@ -84,7 +84,7 @@
     "backfill_weekday": 0,
     "backfill_hours_et": [
       6,
-      8
+      22
     ],
     "backfill_every_days": 7,
     "prekickoff_window_minutes": [
