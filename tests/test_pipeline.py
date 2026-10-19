@@ -443,3 +443,15 @@ def test_european_seeds_have_no_domestic_namesakes():
             if r["competition"] in ("UCL", "UEL", "UECL"):
                 clubs.update((r["home"], r["away"]))
     assert not clubs & {"Angers", "Apollon", "Paris FC"}
+
+
+def test_legacy_api_football_ucl_rows_dropped(conn):
+    from matchpredictor import history
+    rows = [("2223", "2022-09-07", "Ajax", "Rangers", "seed"), ("2223", "2022-09-07", "Ajax", "Angers", "api-football"),
+            (config.season_code(datetime.now(timezone.utc)), "2026-10-14", "Roma", "Real Madrid", "api-football")]
+    for season, d, h, a, src in rows:
+        db.upsert_match(conn, {"league": "UCL", "season": season, "date": d, "home": h, "away": a, "status": "FT",
+                               "fthg": 4, "ftag": 0, "source": src})
+    assert history.drop_legacy_europe_rows(conn) == 1          # the fuzzy-named past-season row only
+    left = {(r[0], r[1]) for r in conn.execute("SELECT home, away FROM matches WHERE league='UCL'")}
+    assert left == {("Ajax", "Rangers"), ("Roma", "Real Madrid")}

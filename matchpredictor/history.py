@@ -120,32 +120,19 @@ def fit_elo_params(df, book, before: str | None = None) -> dict | None:
 
 # ---------------------------------------------------------------- API-Football history
 
-def _store_fixture_rows(conn, comp: str, fixtures: list[dict], known: set[str]) -> int:
-    n = 0
-    for f in fixtures:
-        if not f["finished"] or f["fthg"] is None or not api_football.is_main_round(f["round"]):
-            continue
-        home, away = config.canonical_team(f["home"], known), config.canonical_team(f["away"], known)
-        db.upsert_match(conn, {"league": comp, "season": config.season_code(f["date"]), "date": f["date"],
-                               "kickoff_utc": f["kickoff_utc"], "home": home, "away": away, "status": "FT",
-                               "fthg": int(f["fthg"]), "ftag": int(f["ftag"]), "referee": f["referee"],
-                               "api_football_id": f["id"], "source": "api-football"})
-        n += 1
-    return n
+def drop_legacy_europe_rows(conn) -> int:
+    """Remove Champions League rows the old API-Football loader wrote for past seasons. It fuzzy-matched club
+    names against league clubs only, so Rangers became 'Angers' (stored again on 2026-10-19, once the PRO plan
+    let it run). The seeds hold those seasons with checked names, and the warehouse the full API-Football data."""
+    cur = conn.execute("DELETE FROM matches WHERE league='UCL' AND source='api-football' AND season < ? "
+                       "AND id NOT IN (SELECT match_id FROM predictions)", (config.season_code(now_utc()),))
+    return cur.rowcount
 
 
 def backfill_api_football(conn, notes: list[str], seasons=(2022, 2023, 2024)) -> dict:
-    """Historical Champions League results; league referees + injuries for the latest allowed season."""
-    known = all_team_names(conn, leagues_only=True)
+    """League referees + injuries for the latest allowed season. (Champions League history is no longer
+    fetched here: data/history seeds + the warehouse cover it, without cross-league name guessing.)"""
     out = {}
-    comps = config.competitions()
-    for year in seasons:
-        client = api_football.Client(conn)       # fresh client: a plan error for one season mustn't block others
-        try:
-            fx = [api_football.parse_fixture(f) for f in client.season_fixtures(comps["UCL"]["api_football_id"], year)]
-            out[f"UCL:{year}"] = _store_fixture_rows(conn, "UCL", fx, known)
-        except api_football.ApiFootballUnavailable as e:
-            notes.append(f"API-Football Champions League {year}: {e}")
     year = max(seasons)
     for lg, c in config.leagues().items():
         client = api_football.Client(conn)
@@ -209,7 +196,10 @@ def load_seed(conn) -> int:
 # ---------------------------------------------------------------- everything
 
 def refresh(conn, current: str, notes: list[str], backtest: bool = False) -> dict:
+    dropped = drop_legacy_europe_rows(conn)          # before the seeds load, so seed rows are restored at once
     out = {"seed": load_seed(conn), "football_data": football_data.update_history(conn, current, notes)}
+    if dropped:
+        out["legacy_europe_rows_dropped"] = dropped
     out["extra_leagues"] = football_data.update_extra(conn, current, notes)
     conn.commit()
     out["understat"] = understat.update(conn, current, notes)
