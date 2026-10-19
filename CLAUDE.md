@@ -153,6 +153,9 @@ site/  index.html (all pages as tabs), results/corners/cards/shots/players.html 
 - Never fuzzy-match club names across leagues: v1 of the extra-league loader turned Aris into 'Paris FC' and
   Rangers into 'Angers' (also in the 2022-23 UCL seed). Extra leagues map names through aliases only
   (`football_data.EXTRA_NAMES_VERSION` wipes + reloads them once); the warehouse maps API clubs by fixture evidence.
+  The old API-Football Champions League loader (backtest refresh) did the same and came back to life with the PRO
+  plan on 2026-10-19 (Rangers -> 'Angers' again): it no longer fetches UCL history, and
+  `history.drop_legacy_europe_rows` deletes its past-season UCL rows before the seeds load on every refresh.
 - A queued run used to check out the commit it was triggered on and then win the `-X ours` merge with a stale
   match.db (2026-10-14: a backfill erased the daily run's name repair). Runs now check out the branch head when
   they start, and backfill runs commit only data/history/.
