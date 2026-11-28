@@ -8,9 +8,9 @@ name: predict
 # The gate also picks backfill once a week (first Monday tick from 06:00 ET, see schedule.py).
 # Only runs on main commit data and deploy Pages; runs on other branches are read-only checks
 # (their results go to the job log and an artifact).
+# PROJECT STOPPED (2026-11-28): no schedule and no Pages deploy. To restart, restore the
+# `schedule` trigger and the upload-pages-artifact step + deploy job from git history.
 on:
-  schedule:
-    - cron: "7 * * * *"
   workflow_dispatch:
     inputs:
       mode:
@@ -19,8 +19,6 @@ on:
 
 permissions:
   contents: write
-  pages: write
-  id-token: write
 
 concurrency:
   group: predict-${{ github.ref }}
@@ -141,19 +139,3 @@ jobs:
               git pull --no-rebase --no-edit -X ours origin main
             done
           fi
-
-      - uses: actions/upload-pages-artifact@v3
-        if: github.ref == 'refs/heads/main' && steps.gate.outputs.mode != 'skip' && steps.gate.outputs.mode != 'netcheck'
-        with:
-          path: site
-
-  deploy:
-    needs: predict
-    if: github.ref == 'refs/heads/main' && needs.predict.outputs.mode != 'skip' && needs.predict.outputs.mode != 'netcheck'
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - id: deployment
-        uses: actions/deploy-pages@v4
